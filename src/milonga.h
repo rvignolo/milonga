@@ -26,6 +26,14 @@
 
 #include <wasora.h>
 
+// tiene que estar porque aca usamos referencias a tracking y eso no es de wasora
+// en realidad es una operacion sobre mallas, por lo que deberia ser parte de wasora
+#include "discretizations/track.h"
+
+// y esta esta porque no existe el puntero a funcion que sea solve_problem, 
+// ya que las otras discretizaciones llaman a solvers de petsc o slepsc
+#include "discretizations/moc_volumes.h"
+
 #include <petscsys.h>
 #include <petscpc.h>
 #include <petsctime.h>
@@ -56,10 +64,11 @@ PetscErrorCode petsc_err;
 #define POST_INCLUDE_FLUX           16
 #define POST_INCLUDE_XS             32
 
-#define BC_UNDEFINED  0    //    diffusion                      sn
-#define BC_NULL       1    //   null flux                 null outward flux
-#define BC_VACUUM     2    // robin with 0.5D             null outward flux
-#define BC_MIRROR     3    // zero normal derivative      equal reflectected fluxes
+#define BC_UNDEFINED  0    //    diffusion                      sn                         moc
+#define BC_NULL       1    //   null flux                 null outward flux            null inward angular fluxes
+#define BC_VACUUM     2    // robin with 0.5D             null outward flux            null inward angular fluxes
+#define BC_MIRROR     3    // zero normal derivative      equal reflectected fluxes    equal reflectected angular fluxes
+#define BC_PERIODIC   4    // not yet implemented         not yet implemented          periodic angular fluxes
 
 // forward definitions
 typedef struct xs_t xs_t;
@@ -110,6 +119,30 @@ struct {
   PC pc;        // contexto del precondicionador
 
   struct {
+    int scalar_size;                        // numero de incognitas del flujo escalar del problema
+    int angular_size;                       // numero de incognitas del flujo angular en la frontera
+    
+    int max_moc_iterations;                 // hay un numero maximo de iteraciones que permitimos
+    
+    double max_moc_residual;                // criterio de convergencia con el error relativo
+    
+    double *phi;                            // flujo escalar para cada celda y grupo
+    double *old_phi;                        // maneje para computar el residuo entre dos iteraciones
+    
+    double *reduced_source;                 // fuente de fision y scatering reducida para cada celda y grupo
+    
+    double *boundary_psi;                   // flujo angular en la frontera
+    double *start_boundary_psi;             // maneje para actualizar las condiciones de contorno
+    
+    tracks_t *tracks;                       // el tracking de la malla del problema junto a la cuadratura
+    
+    polar_quadrature_t *polar_quadrature;   // la cuadratura polar del problema
+    
+    int do_not_linearize_exp;               // flag para saber si se hace o no interpolacion lineal de las exponenciales
+    exp_evaluator_t *exp_evaluator;         // evaluador de exponenciales
+  } moc_solver;
+  
+  struct {
     var_t *keff;
     var_t *rel_tolerance;
     var_t *power;
@@ -121,6 +154,9 @@ struct {
     var_t *residual_norm;
     var_t *error_estimate;
     var_t *rel_error;
+    
+    var_t *moc_rel_error;
+    var_t *moc_n_iter;
 
     var_t *time_wall_ini;
     var_t *time_wall_build;
@@ -185,6 +221,7 @@ struct {
   enum {
     formulation_diffusion,
     formulation_sn,
+    formulation_moc
   } formulation;
   
   loadable_routine_t *user_provided_eigensolver;
@@ -223,9 +260,18 @@ struct {
 
 } milonga;
 
+struct {
+  tracks_t *main_ray_tracing;
+  polar_quadrature_t *main_polar_quadrature;
+  
+  tracks_t *ray_tracings;                      // tabla de hash de trackings
+  polar_quadrature_t *polar_quadratures;       // tabla de hash de polar quadratures
+} tracking;
+
 struct milonga_step_t {
   int do_not_build;
   int do_not_solve;
+  int verbose;
 };
 
 // para medir tiempos (wall y cpu)
@@ -254,6 +300,17 @@ struct xs_t {
   
   // la fuente de neutrones independiente
   expr_t **S;
+  
+  struct {
+    double *D;
+    double *nuSigmaF;
+    double *SigmaT;
+    double *SigmaA;
+    double **SigmaS0;
+    double **SigmaS1;
+    double *eSigmaF;
+    double *S;
+  } xs_values;
 
   xs_t *next;
 };
@@ -284,6 +341,7 @@ struct {
 
 // milonga.c
 extern void milonga_resolve_xs_expr(material_t *, char *, expr_t **, int, int);
+extern int milonga_resolve_xs_values(void);
 extern int milonga_assembly_objects(MatAssemblyType);
 
 // boundary.c
@@ -297,10 +355,16 @@ extern int plugin_finalize(void);
 
 extern int milonga_problem_init(void);
 extern int milonga_instruction_step(void *);
+extern int milonga_instruction_moc_step(void *);
 
 // parser.c
 extern int milonga_parse_line(char *);
 extern int milonga_define_result_functions(void);
+
+extern tracks_t *milonga_define_ray_tracing(char *, mesh_t *, expr_t *, expr_t *, expr_t *, expr_t *, int, int);
+extern tracks_t *milonga_get_ray_tracing_ptr(const char *);
+extern polar_quadrature_t *milonga_define_polar_quadrature(char *, expr_t *, int);
+extern polar_quadrature_t *milonga_get_polar_quadrature_ptr(const char *);
 
 // allocate.c
 extern int milonga_allocate_global_matrices(int, int, int);

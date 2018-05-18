@@ -47,8 +47,11 @@ int milonga_read_boundaries(void) {
       } else if (strcasecmp(string, "vacuum") == 0 || strcasecmp(string, "robin") == 0) {
         physical_entity->bc_type_phys = BC_VACUUM;
 
-      } else if (strcasecmp(string, "mirror") == 0 || strcasecmp(string, "neumann") == 0) {
+      } else if (strcasecmp(string, "mirror") == 0 || strcasecmp(string, "neumann") == 0 || strcasecmp(string, "reflective") == 0) {
         physical_entity->bc_type_phys = BC_MIRROR;
+
+      } else if (strcasecmp(string, "periodic") == 0) {
+        physical_entity->bc_type_phys = BC_PERIODIC;
 
       } else {
         if (physical_entity->bc_type_phys == BC_UNDEFINED) {

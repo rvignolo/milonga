@@ -148,8 +148,8 @@ int plugin_parse_line(char *line) {
           char *keywords[] = {"volumes", "elements", ""};
           int values[] = {scheme_volumes, scheme_elements, 0};
           wasora_call(wasora_parser_keywords_ints(keywords, values, (int *)&milonga.scheme));
-         
-///kw+MILONGA_PROBLEM+usage [ FORMULATION { diffusion | s2 | s4 | s6 | s8 } ]
+
+///kw+MILONGA_PROBLEM+usage [ FORMULATION { diffusion | s2 | s4 | s6 | s8 | moc} ]
         } else if (strcasecmp(token, "FORMULATION") == 0) {
           
           char *formulation;
@@ -172,14 +172,46 @@ int plugin_parse_line(char *line) {
             } else if (strcasecmp(formulation, "s8") == 0) {
               milonga.formulation = formulation_sn;
               milonga.SN = 8;
+            } else if (strcasecmp(formulation, "moc") == 0) {
+              milonga.formulation = formulation_moc;
             } else {
-              wasora_push_error_message("unknown formulation '%s' (either diffusion, s2, s4, s6 or s8)", formulation);
+              wasora_push_error_message("unknown formulation '%s' (either diffusion, s2, s4, s6, s8 or moc)", formulation);
               free(formulation);
               return WASORA_PARSER_ERROR;
             }
           }
           
           free(formulation);
+          
+///kw+MILONGA_PROBLEM+usage [ TRACK <identifier> ]
+        } else if (strcasecmp(token, "TRACK") == 0) {
+          
+          char *track_name;
+          
+          wasora_call(wasora_parser_string(&track_name));
+          if ((milonga.moc_solver.tracks = milonga_get_ray_tracing_ptr(track_name)) == NULL) {
+            wasora_push_error_message("unknown track '%s'", track_name);
+            free(track_name);
+            return WASORA_PARSER_ERROR;
+          }
+          free(track_name);
+          
+///kw+MILONGA_PROBLEM+usage [ POLAR_QUADRATURE <identifier> ]
+        } else if (strcasecmp(token, "POLAR_QUADRATURE") == 0) {
+          
+          char *polar_quad_name;
+          
+          wasora_call(wasora_parser_string(&polar_quad_name));
+          if ((milonga.moc_solver.polar_quadrature = milonga_get_polar_quadrature_ptr(polar_quad_name)) == NULL) {
+            wasora_push_error_message("unknown polar quadrature '%s'", polar_quad_name);
+            free(polar_quad_name);
+            return WASORA_PARSER_ERROR;
+          }
+          free(polar_quad_name);
+          
+///kw+MILONGA_PROBLEM+usage [ DO_NOT_LINEARIZE_EXPONENTIALS ]
+        } else if (strcasecmp(token, "DO_NOT_LINEARIZE_EXPONENTIALS") == 0) {
+          milonga.moc_solver.do_not_linearize_exp = 1;
           
 ///kw+MILONGA_PROBLEM+usage [ VOLHOM ]
         } else if (strcasecmp(token, "VOLHOM") == 0) {
@@ -212,11 +244,198 @@ int plugin_parse_line(char *line) {
         }
       }
       
+      // si estamos en formulacion moc
+      if (milonga.formulation == formulation_moc) {
+        // si nos dieron cuadratura pero no el track
+        if (milonga.moc_solver.tracks == NULL && milonga.moc_solver.polar_quadrature != NULL) {
+          wasora_push_error_message("TRACK should be given if a polar quadrature is selected in MILONGA_PROBLEM", token);
+          return WASORA_PARSER_ERROR;
+          
+          // si nos dieron el track pero no la cuadratura, usamos por defecto lo que que este trae
+        } else if (milonga.moc_solver.tracks != NULL && milonga.moc_solver.polar_quadrature == NULL) {
+          // no hacemos nada
+          
+          // si no nos dieron nada y han definido al menos un tracking, lo usamos
+        } else if (milonga.moc_solver.tracks == NULL && milonga.moc_solver.polar_quadrature == NULL) {
+          
+          if (tracking.main_ray_tracing != NULL) {
+            milonga.moc_solver.tracks = tracking.main_ray_tracing;
+          } else {
+            wasora_push_error_message("unknown TRACK for MILONGA_PROBLEM", token);
+            return WASORA_PARSER_ERROR;
+          }
+          // y ademas, si hay una cuadratura principal, tambien la usamos
+          if (tracking.main_polar_quadrature != NULL) {
+            milonga.moc_solver.polar_quadrature = tracking.main_polar_quadrature;
+          }
+          
+          // y si nos dieron todo, no hacemos nada
+        } else if (milonga.moc_solver.tracks != NULL && milonga.moc_solver.polar_quadrature != NULL) {
+          
+        } else {
+          wasora_push_error_message("por aca no deberias pasar nunca!", token);
+          return WASORA_PARSER_ERROR;
+        }
+      }
       
       wasora_call(milonga_define_result_functions());
       
       return WASORA_PARSER_OK;
       
+// ---------------------------------------------------------------------
+///kw+TRACK_MESH+usage TRACK_MESH
+///kw+TRACK_MESH+desc Tracks the mesh for the implementation of the Method of Characteristics.
+///kw+TRACK_MESH+desc A multiple of 4 number for the azimuthal angles must be specified, as well as the track density or azimutal spacing.
+///kw+TRACK_MESH+desc If several meshes are defined, it selects over which one it is that the tracking is performed.
+    } else if (strcasecmp(token, "TRACK_MESH") == 0) {
+      
+      tracks_t *ray_tracing;
+      char *name = NULL;
+      mesh_t *mesh = NULL;
+      expr_t *expr_n_azim = calloc(1, sizeof(expr_t));
+      expr_t *expr_track_dens = calloc(1, sizeof(expr_t));
+      expr_t *expr_track_spacing = calloc(1, sizeof(expr_t));
+      expr_t *expr_tiny_step = calloc(1, sizeof(expr_t));
+      int do_not_correct_volumes = 0;
+      int debug = 0;
+      
+      while ((token = wasora_get_next_token(NULL)) != NULL) {
+        
+///kw+TRACK_MESH+usage [ NAME <expr> ]
+        if (strcasecmp(token, "NAME") == 0) {
+          
+          wasora_call(wasora_parser_string(&name));
+          
+///kw+TRACK_MESH+usage { N_AZIM_ANGLES <expr> }
+        } else if (strcasecmp(token, "N_AZIM_ANGLES") == 0 || strcasecmp(token, "N_AZIM") == 0){
+          
+          wasora_call(wasora_parser_expression(expr_n_azim));
+          
+///kw+TRACK_MESH+usage { TRACK_DENS <expr> |
+        } else if (strcasecmp(token, "TRACK_DENS") == 0){
+          
+          wasora_call(wasora_parser_expression(expr_track_dens));
+///kw+TRACK_MESH+usage TRACK_SPACING <expr> }
+        } else if (strcasecmp(token, "TRACK_SPACING") == 0) {
+          
+          wasora_call(wasora_parser_expression(expr_track_spacing));
+          
+///kw+TRACK_MESH+usage [ TINY_STEP <expr> ]
+        } else if (strcasecmp(token, "TINY_STEP") == 0) {
+          
+          wasora_call(wasora_parser_expression(expr_tiny_step));
+          
+///kw+TRACK_MESH+usage [ DO_NOT_CORRECT_VOLUMES ]
+        } else if (strcasecmp(token, "DO_NOT_CORRECT_VOLUMES") == 0) {
+          
+          do_not_correct_volumes = 1;
+          
+///kw+TRACK_MESH+usage [ DEBUG ]
+        } else if (strcasecmp(token, "DEBUG") == 0) {
+          
+          debug = 1;
+          
+///kw+TRACK_MESH+usage { MESH <identifier> }
+        } else if (strcasecmp(token, "MESH") == 0) {
+          char *mesh_name;
+          
+          wasora_call(wasora_parser_string(&mesh_name));
+          if ((mesh = wasora_get_mesh_ptr(mesh_name)) == NULL) {
+            wasora_push_error_message("unknown mesh '%s'", mesh_name);
+            free(mesh_name);
+            return WASORA_PARSER_ERROR;
+          }
+          free(mesh_name);
+          
+        } else {
+          wasora_push_error_message("undefined keyword '%s'", token);
+          return WASORA_PARSER_ERROR;
+        }
+      }
+      
+      // si no nos dieron el numero de angulos azimutales
+      if (expr_n_azim->n_tokens == 0) {
+        wasora_push_error_message("N_AZIM_ANGLES keyword should be specified");
+        return WASORA_PARSER_ERROR;
+      }
+      
+      //si nos dieron TRACK_SPACING y TRACK_DENS
+      if (expr_track_spacing->n_tokens != 0 && expr_track_dens->n_tokens != 0) {
+        wasora_push_error_message("both TRACK_SPACING and TRACK_DENS keywords specified");
+        return WASORA_PARSER_ERROR;
+        //o si no nos dieron ninguno
+      } else if (expr_track_spacing->n_tokens == 0 && expr_track_dens->n_tokens == 0) {
+        wasora_push_error_message("TRACK_SPACING or TRACK_DENS keyword should be specified");
+        return WASORA_PARSER_ERROR;
+      }  
+      
+      // si no nos dieron explicitamente la malla, ponemos la principal, pero si no hay, chau
+      if (mesh == NULL && (mesh = wasora_mesh.main_mesh) == NULL) {
+        wasora_push_error_message("unknown mesh for TRACK_MESH (no MESH keyword)", token);
+        return WASORA_PARSER_ERROR;
+      }
+      
+      if ((ray_tracing = milonga_define_ray_tracing(name, mesh, expr_n_azim, expr_track_dens, expr_track_spacing, expr_tiny_step, do_not_correct_volumes, debug)) == NULL) {
+        return WASORA_PARSER_ERROR;
+      }
+      
+      if (wasora_define_instruction(milonga_instruction_track, ray_tracing) == NULL) {
+        return WASORA_PARSER_ERROR;
+      }
+      
+      return WASORA_PARSER_OK;
+      
+// ---------------------------------------------------------------------
+///kw+POLAR_QUADRATURE+usage POLAR_QUADRATURE
+///kw+POLAR_QUADRATURE+desc Selects the number of polar angles and the polar quadrature type for the Method of Characteristics
+    } else if (strcasecmp(token, "POLAR_QUADRATURE") == 0) {
+      
+      polar_quadrature_t *polar_quad;
+      char *name = NULL;
+      int polar_quad_type = 0;
+      expr_t *expr_n_polar = calloc(1, sizeof(expr_t));
+      
+      while ((token = wasora_get_next_token(NULL)) != NULL) {
+        
+///kw+POLAR_QUADRATURE+usage [ NAME <expr> ]
+        if (strcasecmp(token, "NAME") == 0) {
+          
+          wasora_call(wasora_parser_string(&name));
+        
+///kw+POLAR_QUADRATURE+usage { TYPE { equal_weight | equal_angle | gauss_legendre | leonard | tabuchi_yamamoto } }
+        } else if (strcasecmp(token, "TYPE") == 0) {
+          
+          char *keywords[] = {"tabuchi_yamamoto", "equal_weight", "equal_angle", "gauss_legendre", "leonard", ""};
+          int values[] = {tabuchi_yamamoto, equal_weight, equal_angle, gauss_legendre, leonard, 0};
+          
+          wasora_call(wasora_parser_keywords_ints(keywords, values, &polar_quad_type));
+          
+///kw+POLAR_QUADRATURE+usage { N_POLAR_ANGLES <expr> }
+        } else if (strcasecmp(token, "N_POLAR_ANGLES") == 0 || strcasecmp(token, "N_POLAR") == 0){
+          
+          wasora_call(wasora_parser_expression(expr_n_polar));
+          
+        } else {
+          wasora_push_error_message("undefined keyword '%s'", token);
+          return WASORA_PARSER_ERROR;
+        }
+      }
+      
+      // si no nos dieron el numero de angulos polares
+      if (expr_n_polar->n_tokens == 0) {
+        wasora_push_error_message("N_POLAR_ANGLES keyword should be specified");
+        return WASORA_PARSER_ERROR;
+      }
+      
+      if ((polar_quad = milonga_define_polar_quadrature(name, expr_n_polar, polar_quad_type)) == NULL) {
+        return WASORA_PARSER_ERROR;
+      }
+      
+      if (wasora_define_instruction(milonga_instruction_polar_quadrature, polar_quad) == NULL) {
+        return WASORA_PARSER_ERROR;
+      }
+      
+      return WASORA_PARSER_OK;
 // ---------------------------------------------------------------------
 ///kw+IMPLICIT_BC+usage IMPLICIT_BC
     } else if (strcasecmp(token, "IMPLICIT_BC") == 0) {
@@ -352,6 +571,9 @@ int plugin_parse_line(char *line) {
         } else if (strcasecmp(token, "JUST_SOLVE") == 0) {
           milonga_step->do_not_build = 1;
           milonga_step->do_not_solve = 0;
+///kw+MILONGA_STEP+usage [ VERBOSE ]
+        } else if (strcasecmp(token, "VERBOSE") == 0) {
+          milonga_step->verbose = 1;
         } else {
           wasora_push_error_message("unknown keyword '%s'", token);
           return WASORA_PARSER_ERROR;
@@ -359,7 +581,11 @@ int plugin_parse_line(char *line) {
 
       }
       
-      wasora_define_instruction(milonga_instruction_step, milonga_step);
+      if (milonga.formulation == formulation_moc) {
+        wasora_define_instruction(milonga_instruction_moc_step, milonga_step);
+      } else {
+        wasora_define_instruction(milonga_instruction_step, milonga_step);
+      }
       
       return WASORA_PARSER_OK;
 
@@ -416,7 +642,7 @@ int plugin_parse_line(char *line) {
       if (mesh_post->format == post_format_fromextension) {
         char *ext = mesh_post->file->format + strlen(mesh_post->file->format) - 4;
         
-               if (strcasecmp(ext, ".pos") == 0 || strcasecmp(ext, ".msh") == 0) {
+        if (strcasecmp(ext, ".pos") == 0 || strcasecmp(ext, ".msh") == 0) {
           mesh_post->format = post_format_gmsh;
         } else if (strcasecmp(ext, ".vtk") == 0) {
           mesh_post->format = post_format_vtk;
@@ -448,6 +674,115 @@ int plugin_parse_line(char *line) {
       wasora_define_instruction(wasora_instruction_mesh_post, mesh_post);
       return WASORA_PARSER_OK;
     
+// ---------------------------------------------------------------------
+///kw+TRACK_POST+usage TRACK_POST
+///kw+TRACK_POST+desc Writes a post-processing file with ray tracing information.
+    } else if (strcasecmp(token, "TRACK_POST") == 0) {
+      
+      double xi;
+      track_post_t *track_post = calloc(1, sizeof(track_post_t));
+      
+      while ((token = wasora_get_next_token(NULL)) != NULL) {
+        
+///kw+TRACK_POST+usage { FILE <name> |
+        if (strcasecmp(token, "FILE") == 0) {
+          wasora_call(wasora_parser_file(&track_post->file));
+///kw+TRACK_POST+usage FILE_PATH <file_path> }
+        } else if (strcasecmp(token, "FILE_PATH") == 0) {
+          char *file_path;
+          wasora_call(wasora_parser_string(&file_path));
+          if ((track_post->file = wasora_define_file(file_path, file_path, 0, NULL, "w", 0)) == NULL) {
+            return WASORA_RUNTIME_ERROR;
+          }
+          free(file_path);
+
+///kw+TRACK_POST+usage [ NO_MESH ]
+        } else if (strcasecmp(token, "NOMESH") == 0 || strcasecmp(token, "NO_MESH") == 0) {
+          track_post->no_mesh = 1;
+      
+///kw+TRACK_POST+usage [ FORMAT { gnuplot } ]
+        } else if (strcasecmp(token, "FORMAT") == 0) {
+          char *keywords[] = {"gnuplot", ""};
+          int values[] = {post_format_gnuplot, 0};
+          wasora_call(wasora_parser_keywords_ints(keywords, values, (int *)&track_post->format));
+          
+///kw+TRACK_POST+usage { TRACK <identifier> }
+        } else if (strcasecmp(token, "TRACK") == 0) {
+          char *track_name;
+          
+          wasora_call(wasora_parser_string(&track_name));
+          if ((track_post->tracks = milonga_get_ray_tracing_ptr(track_name)) == NULL) {
+            wasora_push_error_message("unknown track '%s'", track_name);
+            free(track_name);
+            return WASORA_PARSER_ERROR;
+          }
+          free(track_name);
+          
+///kw+TRACK_POST+usage [ TRACK_ID ]
+        } else if (strcasecmp(token, "TRACK_ID") == 0) {
+          wasora_call(wasora_parser_expression_in_string(&xi));
+          track_post->track_id = (int)(xi);
+          if (track_post->track_id < 1)  {
+            wasora_push_error_message("a positive number of track id should be given instead of '%d'", track_post->track_id);
+            return WASORA_PARSER_ERROR;
+          }
+          
+///kw+TRACK_POST+usage [ N_AZIM_ID ]
+        } else if (strcasecmp(token, "AZIM_ID") == 0) {
+          wasora_call(wasora_parser_expression_in_string(&xi));
+          track_post->azim_id = (int)(xi);
+          if (track_post->azim_id < 1)  {
+            wasora_push_error_message("a positive number of azim id should be given instead of '%d'", track_post->azim_id);
+            return WASORA_PARSER_ERROR;
+          }
+          
+        } else {
+          wasora_push_error_message("unknown keyword '%s'", token);
+          return WASORA_PARSER_ERROR;
+        }
+      }
+      
+      // si no nos dieron un track, nos vamos
+      if (track_post->tracks == NULL) {
+        wasora_push_error_message("missing ray tracing structure to plot (TRACK keyword)");
+        return WASORA_PARSER_ERROR;
+      }
+      
+      if (track_post->file == NULL) {
+        wasora_push_error_message("neither FILE not FILE_PATH given (use explicitly 'stdout' if you intend to)");
+        return WASORA_PARSER_ERROR;
+      }
+      
+      if (track_post->azim_id > 0 && track_post->track_id > 0) {
+        wasora_push_error_message("both AZIM_ID and TRACK_ID keywords specified");
+        return WASORA_PARSER_ERROR;
+      }
+      
+      if (track_post->format == post_format_from_extension) {
+        char *ext = track_post->file->format + strlen(track_post->file->format) - 4;
+        
+        if (strcasecmp(ext, ".plt") == 0 || strcasecmp(ext, ".gnu") == 0 || strcasecmp(ext, ".gpi") == 0) {
+          track_post->format = post_format_gnuplot;
+        } else {
+          wasora_push_error_message("unknown extension '%s' and no FORMAT given", ext);
+          return WASORA_PARSER_ERROR;
+        }
+      }
+      
+      // dejo todo preparado por si alguien quiere agregar un formato
+      switch (track_post->format) {
+        case post_format_gnuplot:
+          track_post->write_header = track_gnuplot_write_header;
+          track_post->write_mesh = track_gnuplot_write_mesh;
+          track_post->write_tracks = track_gnuplot_write_tracks;
+          break;
+        default:
+          wasora_push_error_message("unknown TRACK_POST format");
+          return WASORA_PARSER_ERROR;
+      }
+      
+      wasora_define_instruction(milonga_instruction_track_post, track_post);
+      return WASORA_PARSER_OK;
     }
   }
   
@@ -500,6 +835,9 @@ int milonga_define_result_functions(void) {
   } else if (milonga.formulation == formulation_diffusion) {
     // ponemos esto para difusion para que sea facil calcular los grados de libertad
     milonga.directions = 1;
+  } else if (milonga.formulation == formulation_moc) {
+    // TODO: luego hacer algo similar a sn con moc
+    milonga.directions = 1;
   }
 
   // las phi para todos  
@@ -516,4 +854,81 @@ int milonga_define_result_functions(void) {
   }
 
   return WASORA_PARSER_OK;
+}
+
+
+#undef  __FUNCT__
+#define __FUNCT__ "milonga_define_ray_tracing"
+tracks_t *milonga_define_ray_tracing(char *name, mesh_t *mesh, expr_t *expr_n_azim, expr_t *expr_track_dens, expr_t *expr_track_spacing, expr_t *expr_tiny_step, int do_not_check_volumes, int debug) {
+  
+  tracks_t *ray_tracing;
+  
+  if (name == NULL) {
+    name = strdup("tracks");
+  }
+  
+  if (milonga_get_ray_tracing_ptr(name) != NULL) {
+    wasora_push_error_message("there already exists a track named '%s'", name);
+    return NULL;
+  }
+  
+  ray_tracing = calloc(1, sizeof(tracks_t));
+  ray_tracing->name = strdup(name);
+  ray_tracing->mesh = mesh;
+  ray_tracing->expr_n_azim = expr_n_azim;
+  ray_tracing->expr_track_dens = expr_track_dens;
+  ray_tracing->expr_track_spacing = expr_track_spacing;
+  ray_tracing->expr_tiny_step = expr_tiny_step;
+  ray_tracing->do_not_correct_volumes = do_not_check_volumes;
+  ray_tracing->debug = debug;
+  
+  // la agregamos al hash
+  HASH_ADD_KEYPTR(hh, tracking.ray_tracings, ray_tracing->name, strlen(ray_tracing->name), ray_tracing);
+  // y seteamos la principal como esta
+  tracking.main_ray_tracing = ray_tracing;
+  
+  return ray_tracing;
+}
+
+
+// esta va a ir al archivo tracks.c o algo asi
+tracks_t *milonga_get_ray_tracing_ptr(const char *name) {
+  tracks_t *ray_tracing;
+  HASH_FIND_STR(tracking.ray_tracings, name, ray_tracing);
+  return ray_tracing;
+}
+
+#undef  __FUNCT__
+#define __FUNCT__ "milonga_define_polar_quadrature"
+polar_quadrature_t *milonga_define_polar_quadrature(char *name, expr_t *expr_n_polar, int polar_quad_type) {
+  
+  polar_quadrature_t *polar_quad;
+  
+  if (name == NULL) {
+    name = strdup("polar_quadrature");
+  }
+  
+  if (milonga_get_polar_quadrature_ptr(name) != NULL) {
+    wasora_push_error_message("there already exists a polar quadrature named '%s'", name);
+    return NULL;
+  }
+  
+  polar_quad = calloc(1, sizeof(polar_quadrature_t));
+  polar_quad->name = strdup(name);
+  polar_quad->expr_n_polar = expr_n_polar;
+  polar_quad->quad_type = polar_quad_type;
+  
+  // la agregamos al hash
+  HASH_ADD_KEYPTR(hh, tracking.polar_quadratures, polar_quad->name, strlen(polar_quad->name), polar_quad);
+  // y seteamos la principal como esta
+  tracking.main_polar_quadrature = polar_quad;
+  
+  return polar_quad;
+}
+
+// esta va a ir al archivo tracks.c o algo asi
+polar_quadrature_t *milonga_get_polar_quadrature_ptr(const char *name) {
+  polar_quadrature_t *polar_quad;
+  HASH_FIND_STR(tracking.polar_quadratures, name, polar_quad);
+  return polar_quad;
 }

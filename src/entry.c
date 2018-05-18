@@ -29,6 +29,7 @@
 #include "discretizations/diffusion_elements.h"
 #include "discretizations/sn_volumes.h"
 #include "discretizations/sn_elements.h"
+#include "discretizations/moc_volumes.h"
 
 
 #undef  __FUNCT__
@@ -66,7 +67,7 @@ int milonga_set_entry_points(void) {
     milonga.problem_free =       sn_volumes_problem_free;
 
   } else if (milonga.formulation == formulation_sn && milonga.scheme == scheme_elements) {
-    // ordenandas discretas con volumenes finitos
+    // ordenandas discretas con elementos finitos
     milonga.problem_init =       sn_elements_problem_init;
     milonga.results_fill_args =  sn_elements_results_fill_args;
     milonga.matrices_build =     sn_elements_matrices_build;
@@ -75,6 +76,19 @@ int milonga_set_entry_points(void) {
     milonga.results_fill_power = sn_elements_results_fill_power;
     milonga.problem_free =       sn_elements_problem_free;
 
+  } else if (milonga.formulation == formulation_moc && milonga.scheme == scheme_volumes) {
+    // metodo de las caracteristicas con volumenes finitos
+    milonga.problem_init =       moc_volumes_problem_init;
+    milonga.results_fill_args =  moc_volumes_results_fill_args;
+    milonga.matrices_build =     NULL;
+    milonga.results_fill_flux =  moc_volumes_results_fill_flux;
+    milonga.normalize_flux =     moc_volumes_normalize_flux;
+    milonga.results_fill_power = moc_volumes_results_fill_power;
+    milonga.problem_free =       moc_volumes_problem_free;
+  } else if (milonga.formulation == formulation_moc && milonga.scheme == scheme_elements) {
+    // metodo de las caracteristicas con elementos finitos
+    wasora_push_error_message("moc formulation does not handle elements as scheme");
+    return WASORA_RUNTIME_ERROR;
   }
 
   if (milonga.problem_init == NULL) {

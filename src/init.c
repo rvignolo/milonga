@@ -164,6 +164,16 @@ int plugin_init_before_parser(void) {
 ///va+eigen_rel_error+desc reached by the eigensolver.
   milonga.vars.rel_error = wasora_define_variable("eigen_rel_error");
 
+///va+moc_rel_error+name moc_rel_error
+///va+moc_rel_error+desc Maximum relative error allowed for the method of characteristics formulation.
+  milonga.vars.moc_rel_error = wasora_define_variable("moc_rel_error");
+  wasora_var(milonga.vars.moc_rel_error) = 1e-7;
+
+///va+moc_n_iter+name moc_n_iter
+///va+moc_n_iter+desc Maximum iterations allowed for the method of characteristics formulation.
+  milonga.vars.moc_n_iter = wasora_define_variable("moc_n_iter");
+  wasora_var(milonga.vars.moc_n_iter) = 1000;
+
 ///va+eigen_error_estimate+name eigen_error_estimate
 ///va+eigen_error_estimate+desc Absolute error estimate $|\lambda - \lambda_\text{real}|$ (`|lambda - lambda_real|`)
 ///va+eigen_error_estimate+desc of the obtained eigenvalue.
@@ -352,15 +362,31 @@ int plugin_init_after_parser(void) {
       milonga_resolve_xs_expr(material, "SigmaA",   &xs->SigmaA[g],   g, -1);
       milonga_resolve_xs_expr(material, "eSigmaF",  &xs->eSigmaF[g],  g, -1);
 
-      milonga_resolve_xs_expr(material, "S",        &xs->S[g],        g, -1);
-
       xs->SigmaS0[g] = calloc(milonga.groups, sizeof(expr_t *));
       xs->SigmaS1[g] = calloc(milonga.groups, sizeof(expr_t *));
       for (g_prime = 0; g_prime < milonga.groups; g_prime++) {
         milonga_resolve_xs_expr(material, "SigmaS",  &xs->SigmaS0[g][g_prime], g, g_prime);
         milonga_resolve_xs_expr(material, "SigmaSone",  &xs->SigmaS1[g][g_prime], g, g_prime);
       }
+
+      milonga_resolve_xs_expr(material, "S",        &xs->S[g],        g, -1);
     }
+    
+    // estas contienen los valores a determinado instante y nos sirven particularmente en moc
+    xs->xs_values.D = calloc(milonga.groups, sizeof(double));
+    xs->xs_values.nuSigmaF = calloc(milonga.groups, sizeof(double));
+    xs->xs_values.SigmaT = calloc(milonga.groups, sizeof(double));
+    xs->xs_values.SigmaA = calloc(milonga.groups, sizeof(double));
+    xs->xs_values.eSigmaF = calloc(milonga.groups, sizeof(double));
+    
+    xs->xs_values.SigmaS0 = calloc(milonga.groups, sizeof(double *));
+    xs->xs_values.SigmaS1 = calloc(milonga.groups, sizeof(double *));
+    for (g = 0; g < milonga.groups; g++) {
+      xs->xs_values.SigmaS0[g] = calloc(milonga.groups, sizeof(double));
+      xs->xs_values.SigmaS1[g] = calloc(milonga.groups, sizeof(double));
+    }
+    
+    xs->xs_values.S = calloc(milonga.groups, sizeof(double));
   }
   
   // las funciones tipo propiedad van a parar a la malla del problema

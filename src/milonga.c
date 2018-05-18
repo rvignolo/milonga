@@ -190,6 +190,63 @@ int milonga_instruction_step(void *arg) {
   PetscFunctionReturn(WASORA_RUNTIME_OK);
 }
 
+int milonga_instruction_moc_step(void *arg) {
+    
+  milonga_step_t *milonga_step = (milonga_step_t *)arg;
+  int i;
+  
+  double spectrum;
+  
+  if (!milonga.initialized) {
+    
+    wasora_call(milonga.problem_init());
+    wasora_call(milonga_read_boundaries());
+    
+    // dependiendo de las CC del problema, unimos los tracks
+    wasora_call(tracks_set_tracks_boundary_conditions(milonga.moc_solver.tracks));
+    wasora_call(tracks_set_tracks_next_tracks(milonga.moc_solver.tracks));
+    
+    // chequeamos que el espectro de fision este normalizado
+    spectrum = 0;
+    for (i = 0; i < milonga.vectors.chi->size; i++) {
+      spectrum += gsl_vector_get(wasora_value_ptr(milonga.vectors.chi), i);
+    }
+    if (gsl_fcmp(spectrum, 1.0, wasora_var(wasora_mesh.vars.eps)) != 0) {
+      wasora_push_error_message("vector 'chi' with the fission spectrum is not normalized to one (sum of elements is %.6f)", spectrum);
+      return WASORA_RUNTIME_ERROR;
+    }
+    
+    wasora_var(milonga.vars.unknowns) = (double)milonga.problem_size;
+    milonga.initialized = 1;
+  }
+  
+  // rellenamos las xs
+  wasora_call(milonga_resolve_xs_values());
+  
+  // problema de autovalores
+  if (milonga.has_fission != 0 && milonga.has_sources == 0) {
+    
+    // mandamos a calcular
+    wasora_call(moc_volumes_solve_eigen_problem(milonga_step->verbose));
+    
+    // normalizamos el autovector
+    wasora_call(milonga.results_fill_flux());
+    wasora_call(milonga.normalize_flux());
+    
+  // problema lineal
+  }  else if (milonga.has_sources != 0) {
+    wasora_push_error_message("linear problem not yet supported for moc formulation");
+    return WASORA_RUNTIME_ERROR;
+  } else if (milonga.has_fission == 0 && milonga.has_sources == 0) {
+    wasora_push_error_message("sources (independent & fission) are identically zero through the domain");
+    return WASORA_RUNTIME_ERROR;
+  }
+  
+  wasora_call(milonga.results_fill_power());
+  
+  return WASORA_RUNTIME_OK;
+}
+
 
 #undef  __FUNCT__
 #define __FUNCT__ "milonga_resolve_xs_expr"
@@ -309,5 +366,69 @@ int milonga_assembly_objects(MatAssemblyType type) {
   }
   
 
+  return WASORA_RUNTIME_OK;
+}
+
+#undef  __FUNCT__
+#define __FUNCT__ "milonga_resolve_xs_values"
+int milonga_resolve_xs_values(void) {
+  
+  int i;
+  int g, g_prime;
+  
+  cell_t *cell;
+  xs_t *material_xs;
+  
+  for (i = 0; i < milonga.spatial_unknowns; i++) {
+    
+    cell = &wasora_mesh.main_mesh->cell[i];
+    material_xs = (xs_t *)(cell->element->physical_entity->material->ext);
+    
+    wasora_value(wasora_mesh.vars.x) = cell->x[0];
+    wasora_value(wasora_mesh.vars.y) = cell->x[1];
+    wasora_value(wasora_mesh.vars.z) = cell->x[2];
+    
+    for (g = 0; g < milonga.groups; g++) {
+      
+      // SigmaT_g
+      if (material_xs->SigmaT[g]->n_tokens != 0) {
+        material_xs->xs_values.SigmaT[g] = wasora_evaluate_expression(material_xs->SigmaT[g]);
+      } else {
+        material_xs->xs_values.SigmaT[g] = wasora_evaluate_expression(material_xs->SigmaA[g]);
+        for (g_prime = 0; g_prime < milonga.groups; g_prime++) {
+          material_xs->xs_values.SigmaT[g] += wasora_evaluate_expression(material_xs->SigmaS0[g][g_prime]);
+        }
+      }
+      
+      // SigmaA_g
+      if (material_xs->SigmaA[g]->n_tokens != 0) {
+        material_xs->xs_values.SigmaA[g] = wasora_evaluate_expression(material_xs->SigmaA[g]);
+      } 
+      
+      // nuSigmaF_g
+      if (material_xs->nuSigmaF[g]->n_tokens != 0) {
+        if ((material_xs->xs_values.nuSigmaF[g] = wasora_evaluate_expression(material_xs->nuSigmaF[g])) != 0) milonga.has_fission = 1;
+      }
+      
+      // eSigmaF_g
+      if (material_xs->eSigmaF[g]->n_tokens != 0) {
+        material_xs->xs_values.eSigmaF[g] = wasora_evaluate_expression(material_xs->eSigmaF[g]);
+      }
+      
+      // SigmaS0_g.g_prime
+      for (g_prime = 0; g_prime < milonga.groups; g_prime++) {
+        if (material_xs->SigmaS0[g][g_prime]->n_tokens != 0) {
+          material_xs->xs_values.SigmaS0[g][g_prime] = wasora_evaluate_expression(material_xs->SigmaS0[g][g_prime]);
+        }
+      }
+      
+      // S_g
+      if (material_xs->S[g]->n_tokens != 0) {
+        if ((material_xs->xs_values.S[g] = wasora_evaluate_expression(material_xs->S[g])) != 0) milonga.has_sources = 1;
+      }
+      
+    }
+  }
+  
   return WASORA_RUNTIME_OK;
 }
