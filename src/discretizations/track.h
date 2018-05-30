@@ -204,7 +204,7 @@ extern int track_init_polar_quadrature(polar_quadrature_t *);
 extern int track_init_polar_quadrature_values(polar_quadrature_t *);
 extern int track_recalibrate_coords(tracks_t *);
 extern int track_segmentize_tracks(tracks_t *);
-extern int track_compute_element_intersections(element_t *, tracks_t *, track_t *, double, double ***);
+extern int track_compute_element_intersections(element_t *, track_t *, double, double, double ***);
 extern int track_correct_volumes(tracks_t *);
 extern int tracks_set_tracks_boundary_conditions(tracks_t *);
 extern int tracks_set_tracks_next_tracks(tracks_t *);

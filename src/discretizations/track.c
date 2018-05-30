@@ -255,7 +255,7 @@ int track_compute_tracks(tracks_t * tracks) {
         
         wasora_set_point_coords(track->p_o, exit_point[0], exit_point[1], exit_point[2]);
         
-        // si no, seguimos buscando el punto de salida
+        // sino, seguimos buscando el punto de salida
       } else {
         
         // aquellos tracks que apuntan a la derecha
@@ -311,8 +311,13 @@ int track_init_quadratures_after_tracking(tracks_t *tracks) {
   // calculamos la azimuthal quadrature
   wasora_call(track_init_azimuthal_weights(tracks->quadrature->azimuthal));
   
+  
+  // CREO QUE ESTA MAL CONCEPTUALMENTE LLAMAR ACA ESTO, YA QUE EL RAY TRACING NO
+  // DEPENDE REALMENTE DE LO POLAR (ES 2D), ENTONCES BASTA CON LLAMARLA EN LA 
+  // INSTRUCCION DE POLAR QUADRATURE O EN MILONGA PROBLEM
+  // ESTO INCLUSO ME PERMITIRIA PASAR EL RAY TRACING A WASORA, DONDE DEBE ESTAR!
   // calculamos una polar quadrature por defecto
-  wasora_call(track_init_polar_quadrature(tracks->quadrature->polar, 1));
+  wasora_call(track_init_polar_quadrature(tracks->quadrature->polar));
   
   return WASORA_RUNTIME_OK;
 }
@@ -598,6 +603,11 @@ int track_segmentize_tracks(tracks_t *tracks) {
     segment_points[i] = calloc(3, sizeof(double));
   }
   
+  // el ray tracing necesita que el finding inside elements tenga una tolerancia
+  // nula para que wasora no me devuelva elementos que no contienen al punto
+  eps = wasora_var(wasora_mesh.vars.eps);
+  wasora_var(wasora_mesh.vars.eps) = 0.0;
+  
   // ahora tenemos que segmentar cada track
   for (i = 0; i < tracks->n_total_tracks; i++) {
     
@@ -610,20 +620,43 @@ int track_segmentize_tracks(tracks_t *tracks) {
     wasora_set_point_coords(x0, track->p_i[0], track->p_i[1], track->p_i[2]);
     wasora_adjust_point_coords(x0, tracks->tiny_step, M_PI_2, track->phi);
     
+    // ES ESTO LEGACY? NO VEO PORQUE VA ACA!
     wasora_set_point_coords(p_i, track->p_i[0], track->p_i[1], track->p_i[2]);
     
     prev_element = NULL;
     while ((element = mesh_find_element(tracks->mesh, x0)) != NULL) {
       
-      // si por algun motivo el tiny step fue cortito, me muevo un poquito mas
-      if (prev_element != NULL && prev_element == element) {
+      // si estamos arafue o sobre la superficie y wasora nos mando un elemento, nos vamos
+      // tener presente que el segmento anterior puso como punto final del mismo en la sup.
+      if (x0[0] >= tracks->mesh->bounding_box_max.x[0] || x0[0] <= tracks->mesh->bounding_box_min.x[0] || 
+          x0[1] >= tracks->mesh->bounding_box_max.x[1] || x0[1] <= tracks->mesh->bounding_box_min.x[1])
+        break;
+      
+      // si por algun motivo el tiny step fue cortito y me devolvio el mismo elemento, me muevo un poquito mas
+      if (prev_element != NULL && element == prev_element) {
         wasora_adjust_point_coords(x0, tracks->tiny_step, M_PI_2, track->phi);
         continue;
       }
       
+      // si me devuelve un nuevo elemento, pero no es cierto que contenga al punto, me quejo.
+      // esto es hasta que mejoremos el search (puede pasar en mallas deformadas que no alcance
+      // con mirar 1.5 veces la distancia esa de la funcion y la funcion mesh_find_element siga
+      // adelante y me devuelva un punto que no cumpla)
+      // LA SOLUCION VA A SER MANDAR A BUSCAR DE NUEVO EL ELEMENTO PERO UTILISANDO UN RADIO DE 
+      // BUSQUEDA MAYOR HASTA ENCONTRARLO, PORQUE TIENE QUE EXISTIR. Aun asi, ver lo que sigue abajo
+      // donde tmb planteo un posible problema
+      if (!(element->type->point_in_element(element, x0))) {
+        wasora_push_error_message("point x0 does not lie inside the returned element");
+        return WASORA_RUNTIME_ERROR;
+      }
+      
+      // PERO TAMBIEN PUEDE PASAR QUE WASORA ENCUENTRE MAS DE UN ELEMENTO QUE CUMPLA LA CONDICION DE 
+      // POINT IN ELEMENT, Y EN ESE CASO DEBERIAMOS "AFINAR" LA BUSQUEDA. ESTO AUN NO SE DONDE LO VOY
+      // A CODEAR (al parecer esto ya lo solucione con lo del eps arriba, para que no me devuelva elementos
+      // incorrectos que no contienen al punto)
+      
       // recursivamente encontramos los puntos de definicion del segmento
-      eps = 1e-16;
-      track_compute_element_intersections(element, tracks, track, eps, &segment_points);
+      track_compute_element_intersections(element, track, tracks->tiny_step, 1e-16, &segment_points);
       
       // se determina si el point es de entrada o salida
       if (track->phi < M_PI_2) {
@@ -649,6 +682,7 @@ int track_segmentize_tracks(tracks_t *tracks) {
       track_append_segment_to_list(&track->associated_segments, segment);
       
       // y actualizamos los valores
+      // ESTE P_I TMB ME PARECE QUE QUEDO LEGACY! NO VEO PORQUE ESTA ACA!
       wasora_set_point_coords(p_i, p_o[0], p_o[1], p_o[2]);
       wasora_set_point_coords(x0, p_o[0], p_o[1], p_o[2]);
       wasora_adjust_point_coords(x0, tracks->tiny_step, M_PI_2, track->phi);
@@ -657,24 +691,29 @@ int track_segmentize_tracks(tracks_t *tracks) {
     }
     
     // computamos la longitud del track a partir de la sumatoria de las longitudes de los segmentos
-    length = 0;
+    length = 0.0;
     LL_FOREACH(track->associated_segments, associated_segment) {
       segment = associated_segment->segment;
       length += segment->length;
     }
     
-/*
     // y luego verificamos si se cumple la igualdad con la longitud del track (para ver si nos salteamos algun elemento)
-    if (!(gsl_fcmp(length, track->length, 1e-6) == 0)) {
+    if (!(gsl_fcmp(length, track->length, tracks->tiny_step) == 0)) {
       
       if (tracks->debug) {
-        track_post_t *track_post = calloc(1, sizeof(track_post_t));
-        char *file_path = malloc(6 + strlen(tracks->name) + 3 + 1);
         
-        sprintf(file_path, "debug-%s.gp", tracks->name);
+        track_post_t *track_post = calloc(1, sizeof(track_post_t));
+        
+        char id[10];
+        sprintf(id, "%d", track->id);
+        
+        char *file_path = malloc(6 + strlen(tracks->name) + 7 + strlen(id) + 3 + 1);
+        sprintf(file_path, "debug-%s-track-%d.gp", tracks->name, track->id);
+        
         if ((track_post->file = wasora_define_file(file_path, file_path, 0, NULL, "w", 0)) == NULL) {
           return WASORA_RUNTIME_ERROR;
         }
+        
         track_post->tracks = tracks;
         track_post->track_id = track->id;
         track_post->write_header = track_gnuplot_write_header;
@@ -683,17 +722,22 @@ int track_segmentize_tracks(tracks_t *tracks) {
         
         milonga_instruction_track_post(track_post);
         
-        wasora_push_error_message("track %d has been poorly segmented in '%s: real length is %.7e and approx length is %.7e (try using a smaller TINY_STEP or eps). Also, check out the file '%s' with gnuplot.", track->id, tracks->name, track->length, length, file_path);
+        wasora_push_error_message("Check out the file '%s' with gnuplot to inspect the problem.", file_path);
         
         free(file_path);
         free(track_post);
       } else {
-        wasora_push_error_message("track %d has been poorly segmented in '%s: real length is %.7e and approx length is %.7e (try using a smaller TINY_STEP or eps). Also, use DEBUG option in order to get a gnuplot file to check out the problem.", track->id, tracks->name, track->length, length);
+        wasora_push_error_message("Use DEBUG option when doing the raytracing to get a gnuplot file where the problem can be inspected.");
       }
+      
+      wasora_push_error_message("track %d has been poorly segmented in '%s': real length is %.7e while approximate length is %.7e (try using a different TINY_STEP).", track->id, tracks->name, track->length, length);
+      
       return WASORA_RUNTIME_ERROR;
     }
-*/
   }
+  
+  // restauramos el valor
+  wasora_var(wasora_mesh.vars.eps) = eps;
   
   for (i = 0; i < 3; i++) {
     free(segment_points[i]);
@@ -703,14 +747,14 @@ int track_segmentize_tracks(tracks_t *tracks) {
   return WASORA_RUNTIME_OK;
 }
 
-int track_compute_element_intersections(element_t *element, tracks_t *tracks, track_t *track, double eps, double ***segment_points) {
+int track_compute_element_intersections(element_t *element, track_t *track, double tiny_step, double eps, double ***segment_points) {
   
-  int i, j;
+  int i, n_int;
   int p1, p2;
   int parallels;
   int parallel;
   
-  double x_int[3];
+  double x_int[3] = { 0 };
   double int_points[4][3];
   double ABC[3];
   
@@ -719,11 +763,14 @@ int track_compute_element_intersections(element_t *element, tracks_t *tracks, tr
   double *x1;
   double *x2;
   
-  // esto no es tan util...
-  x_int[2] = tracks->z_value;
+  // primero chekeamos no habernos ido de tema
+  if (eps > tiny_step) {
+    wasora_push_error_message("recursive ray tracing algorithm has failed for track '%d' since tolerance eps %.4e is bigger than the tiny step %.4e", track->id, eps, tiny_step);
+    return WASORA_RUNTIME_ERROR;
+  }
   
   // contador de intersecciones
-  j = 0;
+  n_int = 0;
   
   // primero asumimos que el track no es paralelo a ningun segmento
   parallel = 0;
@@ -749,19 +796,19 @@ int track_compute_element_intersections(element_t *element, tracks_t *tracks, tr
       continue;
       // sino, guardo el punto de interseccion
     } else {
-      wasora_set_point_coords(int_points[j], x_int[0], x_int[1], x_int[2]);
+      wasora_set_point_coords(int_points[n_int], x_int[0], x_int[1], x_int[2]);
       // me preparo para el proximo punto de interseccion
-      j++;
+      n_int++;
     }
   }
   
   // si hay 3 o 4 puntos de interseccion, elegimos los dos mas alejados
-  if (j == 3 || j == 4) {
+  if (n_int == 3 || n_int == 4) {
     
-    length = 0;
+    length = 0.0;
     
-    for (p1 = 1; p1 < j; p1++) {
-      for (p2 = p1; p2 < j; p2++) {
+    for (p1 = 1; p1 < n_int; p1++) {
+      for (p2 = p1; p2 < n_int; p2++) {
         
         x1 = int_points[p1-1];
         x2 = int_points[p2];
@@ -777,20 +824,19 @@ int track_compute_element_intersections(element_t *element, tracks_t *tracks, tr
     return WASORA_RUNTIME_OK;
     
     // si hay dos puntos de interseccion y ademas un segmento era paralelo al track
-  } else if (j == 2 && parallel == 1) {
+  } else if (n_int == 2 && parallel == 1) {
     
     wasora_set_point_coords((*segment_points)[0], int_points[0][0], int_points[0][1], int_points[0][2]);
     wasora_set_point_coords((*segment_points)[1], int_points[1][0], int_points[1][1], int_points[1][2]);
     
     return WASORA_RUNTIME_OK;
     
-  } else if (j == 2 && parallel == 0) {
+  } else if (n_int == 2 && parallel == 0) {
     
     // si las intersecciones no estan separadas al menos un tiny step, volvemos a calcular recursivamente
-    if (mesh_subtract_module(int_points[0], int_points[1]) < tracks->tiny_step) {
+    if (mesh_subtract_module(int_points[0], int_points[1]) < tiny_step) {
       
-      eps *= 10;
-      track_compute_element_intersections(element, tracks, track, eps, segment_points);
+      track_compute_element_intersections(element, track, tiny_step, 10*eps, segment_points);
       
     // si no, esta todo piola
     } else {
@@ -802,10 +848,9 @@ int track_compute_element_intersections(element_t *element, tracks_t *tracks, tr
     }
     
     // pero tambien puede pasar esta desgracia
-  } else if (j == 1 || j == 0) {
+  } else if (n_int == 1 || n_int == 0) {
     
-    eps *= 10;
-    track_compute_element_intersections(element, tracks, track, eps, segment_points);
+    track_compute_element_intersections(element, track, tiny_step, 10*eps, segment_points);
   }
   
   return WASORA_RUNTIME_OK;
@@ -893,16 +938,15 @@ alpha_im    \t %e", tracks->mesh->cell[segment->element->cell->id - 1].id, track
     }
   }
   
-/*
   // checkeamos que efectivamente se cumpla la igualdad
   for (i = 0; i < tracks->mesh->n_cells; i++) {
     
+    // should I use tiny step as eps here?
     if (!(gsl_fcmp(tracks->volumes[i], tracks->mesh->cell[i].volume, 1e-10) == 0)) {
       wasora_push_error_message("trivialmente no deberias entrar aca");
       return WASORA_RUNTIME_ERROR;
     }
   }
-*/
   
   return WASORA_RUNTIME_OK;
 }
@@ -955,11 +999,20 @@ int tracks_set_tracks_boundary_conditions(tracks_t *tracks) {
         parallels = 0;
         
         // calculo la interseccion entre el track y el elemento de superficie
+        // obs: siempre hay interseccion, solo resta saber si esta cae dentro del elemento de sup.
         track_compute_intersection(x_int, track->ABC, ABC, &parallels);
         
-        // chekeamos  que haya existido interseccion y si se da sobre la cara del elemento
+        // vemos que nunca se verifique que un track es paralelo a alguna superficie
+        if (parallels) {
+          wasora_push_error_message("track '%d' is parallel to surface element '%d'", track->id, element->id);
+          return WASORA_RUNTIME_ERROR;
+        }
+        
+        // chekeamos si la interseccion se da sobre el dominio del elemento:
+        // no importa si exactamente no es este el elemento que contiene a la entrada\salida del track
+        // ya que todos los elementos sobre una superficie de la bounding box poseen la misma boundary
         eps = 1e-10;
-        if (parallels == 1 || !(wasora_point_in_segment(x1, x2, x_int, eps))) continue;
+        if (!(wasora_point_in_segment(x1, x2, x_int, eps))) continue;
         
         // se determina si la condicion de contorno es de entrada o salida
         d1 = mesh_subtract_squared_module2d(x_int, track->p_i);
@@ -1205,11 +1258,11 @@ int track_compute_general_equation(double ABC[], const double *x1, const double 
 
 int track_compute_intersection(double x_int[], const double ABC_1[], const double ABC_2[], int *parallels) {
   
-  double det;
+  // calculamos el determinante
+  double det = ABC_1[1] * ABC_2[0] - ABC_2[1] * ABC_1[0];
   
   // si existe (no son paralelas ni coincidentes), computo la interseccion
-  det = ABC_1[1] * ABC_2[0] - ABC_2[1] * ABC_1[0];
-  if (fabs(det) > 1e-5) {
+  if (gsl_finite(1.0 / det)) {
     x_int[0] = (ABC_1[2] * ABC_2[1] - ABC_2[2] * ABC_1[1]) / det;
     x_int[1] = (ABC_1[0] * ABC_2[2] - ABC_2[0] * ABC_1[2]) / det;
     x_int[2] = 0;
@@ -1276,7 +1329,7 @@ int milonga_instruction_track_post(void *arg) {
 
 int track_gnuplot_write_header (track_post_t *track_post) {
   
-  fprintf(track_post->file->pointer, "# milonga ray tracing file for gnuplot format\n\n");
+  fprintf(track_post->file->pointer, "# milonga ray tracing file for gnuplot\n\n");
   
   if (track_post->no_mesh == 0) {
     fprintf(track_post->file->pointer, "plot '-' u 1:2 w l lw 1 lt rgb 'black' ti 'mesh %s', '-' u 1:2:3 w lp palette ti 'tracks segments'\n", track_post->tracks->mesh->name);
@@ -1335,10 +1388,17 @@ int track_gnuplot_write_tracks(track_post_t *track_post) {
       for (j = 0; j < track_post->tracks->n_tracks[i]; j++) {
         
         track = &track_post->tracks->track[i][j];
+        
+/*
+        fprintf(track_post->file->pointer, "%e\t%e\t%d\n", track->p_i[0], track->p_i[1], track->id);
+        fprintf(track_post->file->pointer, "%e\t%e\t%d\n", track->p_o[0], track->p_o[1], track->id);
+        fprintf(track_post->file->pointer, "\n");
+*/
+        
         LL_FOREACH(track->associated_segments, associated_segment) {
           segment = associated_segment->segment;
           fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_i[0], segment->p_i[1], segment->element->id);
-          fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_o[0],   segment->p_o[1],   segment->element->id);
+          fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_o[0], segment->p_o[1], segment->element->id);
           fprintf(track_post->file->pointer, "\n");
         }
       }
@@ -1356,7 +1416,7 @@ int track_gnuplot_write_tracks(track_post_t *track_post) {
     LL_FOREACH(track->associated_segments, associated_segment) {
       segment = associated_segment->segment;
       fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_i[0], segment->p_i[1], segment->element->id);
-      fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_o[0],   segment->p_o[1],   segment->element->id);
+      fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_o[0], segment->p_o[1], segment->element->id);
       fprintf(track_post->file->pointer, "\n");
     }
     
@@ -1380,7 +1440,7 @@ int track_gnuplot_write_tracks(track_post_t *track_post) {
       LL_FOREACH(track->associated_segments, associated_segment) {
         segment = associated_segment->segment;
         fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_i[0], segment->p_i[1], segment->element->id);
-        fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_o[0],   segment->p_o[1],   segment->element->id);
+        fprintf(track_post->file->pointer, "%e\t%e\t%d\n", segment->p_o[0], segment->p_o[1], segment->element->id);
         fprintf(track_post->file->pointer, "\n");
       }
     }
@@ -1397,7 +1457,7 @@ int milonga_instruction_polar_quadrature(void *arg) {
   polar_quadrature_t *polar_quad = (polar_quadrature_t *)arg;
   
   // en este caso la cuadratura no es por defecto
-  wasora_call(track_init_polar_quadrature(polar_quad, 0));
+  wasora_call(track_init_polar_quadrature(polar_quad));
   
   return WASORA_RUNTIME_OK;
 }
