@@ -38,7 +38,7 @@ extern int moc_volumes_define_exp_evaluator(void);
 extern int moc_volumes_compute_exp_table(void);
 //extern int moc_volumes_verify_exponential_approx(void);
 extern int moc_volumes_set_uniform_phi(double);
-extern int moc_volumes_update_old_phi(void);
+extern int moc_volumes_update_prev_phi(void);
 extern int moc_volumes_set_uniform_start_boundary_psi(double);
 extern int moc_volumes_update_boundary_psi(void);
 extern int moc_volumes_normalize_fluxes(void);

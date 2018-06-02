@@ -92,7 +92,7 @@ int moc_volumes_allocate_solver(void) {
   milonga.moc_solver.angular_size = angular_size;
   
   milonga.moc_solver.phi = calloc(scalar_size, sizeof(double));
-  milonga.moc_solver.old_phi = calloc(scalar_size, sizeof(double));
+  milonga.moc_solver.prev_phi = calloc(scalar_size, sizeof(double));
   
   milonga.moc_solver.reduced_source = calloc(scalar_size, sizeof(double));
   
@@ -180,7 +180,7 @@ int moc_volumes_solve_eigen_problem(int verbose) {
   // comenzamos a resolver el problema con algunas inicializaciones
   wasora_var_value(milonga.vars.keff) = 1.0;
   wasora_call(moc_volumes_set_uniform_phi(1.0));
-  wasora_call(moc_volumes_update_old_phi());
+  wasora_call(moc_volumes_update_prev_phi());
   wasora_call(moc_volumes_set_uniform_start_boundary_psi(0.0));
   wasora_call(moc_volumes_update_boundary_psi());
   
@@ -191,7 +191,7 @@ int moc_volumes_solve_eigen_problem(int verbose) {
     wasora_call(moc_volumes_compute_phi());
     wasora_call(moc_volumes_compute_keff());
     wasora_call(moc_volumes_compute_residual(&residual));
-    wasora_call(moc_volumes_update_old_phi());
+    wasora_call(moc_volumes_update_prev_phi());
     
     if (verbose) {
       printf("%d\t%e\t%e\n", iter, wasora_var_value(milonga.vars.keff), residual);
@@ -395,7 +395,7 @@ int moc_volumes_set_uniform_phi(double uniform_phi) {
   return WASORA_RUNTIME_OK;
 }
 
-int moc_volumes_update_old_phi(void) {
+int moc_volumes_update_prev_phi(void) {
   
   int i, g;
   
@@ -404,7 +404,7 @@ int moc_volumes_update_old_phi(void) {
   for (i = 0; i < milonga.spatial_unknowns; i++) {
     cell = &wasora_mesh.main_mesh->cell[i];
     for (g = 0; g < milonga.groups; g++) {
-      milonga.moc_solver.old_phi[cell->index[g]] = milonga.moc_solver.phi[cell->index[g]];
+      milonga.moc_solver.prev_phi[cell->index[g]] = milonga.moc_solver.phi[cell->index[g]];
     }
   }
   
@@ -481,7 +481,7 @@ int moc_volumes_normalize_fluxes(void) {
     for (g = 0; g < milonga.groups; g++) {
       cell = &wasora_mesh.main_mesh->cell[i];
       milonga.moc_solver.phi[cell->index[g]] *= normalization_factor;
-      milonga.moc_solver.old_phi[cell->index[g]] *= normalization_factor;
+      milonga.moc_solver.prev_phi[cell->index[g]] *= normalization_factor;
     }
   }
   
@@ -756,7 +756,7 @@ int moc_volumes_compute_residual(double *residual) {
       nu_sigma_f = material_xs->xs_values.nuSigmaF[g_prime];
       //nu_sigma_f = wasora_evaluate_expression(material_xs->nuSigmaF[g_prime]);
       new_qi += nu_sigma_f * milonga.moc_solver.phi[cell->index[g_prime]];
-      old_qi += nu_sigma_f * milonga.moc_solver.old_phi[cell->index[g_prime]];
+      old_qi += nu_sigma_f * milonga.moc_solver.prev_phi[cell->index[g_prime]];
     }
     new_qi /= wasora_var_value(milonga.vars.keff);
     old_qi /= wasora_var_value(milonga.vars.keff);
@@ -767,7 +767,7 @@ int moc_volumes_compute_residual(double *residual) {
         sigma_s = material_xs->xs_values.SigmaS0[g_prime][g];
         //sigma_s = wasora_evaluate_expression(material_xs->SigmaS0[g_prime][g]);
         new_qi += sigma_s * milonga.moc_solver.phi[cell->index[g_prime]];
-        old_qi += sigma_s * milonga.moc_solver.old_phi[cell->index[g_prime]];
+        old_qi += sigma_s * milonga.moc_solver.prev_phi[cell->index[g_prime]];
       }
     }
     

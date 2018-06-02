@@ -25,7 +25,7 @@
 
 
 #include <wasora.h>
-#include "discretizations/track.h"
+#include "track.h"
 
 #include <petscsys.h>
 #include <petscpc.h>
@@ -253,14 +253,6 @@ struct {
 
 } milonga;
 
-struct {
-  tracks_t *main_ray_tracing;
-  polar_quadrature_t *main_polar_quadrature;
-  
-  tracks_t *ray_tracings;                      // tabla de hash de trackings
-  polar_quadrature_t *polar_quadratures;       // tabla de hash de polar quadratures
-} tracking;
-
 struct milonga_step_t {
   int do_not_build;
   int do_not_solve;
@@ -353,11 +345,6 @@ extern int milonga_instruction_moc_step(void *);
 // parser.c
 extern int milonga_parse_line(char *);
 extern int milonga_define_result_functions(void);
-
-extern tracks_t *milonga_define_ray_tracing(char *, mesh_t *, expr_t *, expr_t *, expr_t *, expr_t *, int, int);
-extern tracks_t *milonga_get_ray_tracing_ptr(const char *);
-extern polar_quadrature_t *milonga_define_polar_quadrature(char *, expr_t *, int);
-extern polar_quadrature_t *milonga_get_polar_quadrature_ptr(const char *);
 
 // allocate.c
 extern int milonga_allocate_global_matrices(int, int, int);

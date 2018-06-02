@@ -20,7 +20,7 @@
  *------------------- ------------  ----    --------  --     -       -         -
  */
 
-#include "../milonga.h"
+#include "milonga.h"
 
 #define MAX_TAU         10.0
 #define EXP_PRECISION   1e-5
@@ -193,6 +193,14 @@ struct track_post_t {
   int (*write_tracks)(track_post_t *);   // escribe los segmentos de los tracks
 };
 
+struct {
+  tracks_t *main_ray_tracing;
+  polar_quadrature_t *main_polar_quadrature;
+  
+  tracks_t *ray_tracings;                      // tabla de hash de trackings
+  polar_quadrature_t *polar_quadratures;       // tabla de hash de polar quadratures
+} tracking;
+
 extern int milonga_instruction_track(void *);
 
 extern int track_read_tracking_parameters(tracks_t *);
@@ -225,6 +233,12 @@ extern int track_gnuplot_write_tracks(track_post_t *);
 
 
 extern int milonga_instruction_polar_quadrature(void *);
+
+
+extern tracks_t *milonga_define_ray_tracing(char *, mesh_t *, expr_t *, expr_t *, expr_t *, expr_t *, int, int);
+extern tracks_t *milonga_get_ray_tracing_ptr(const char *);
+extern polar_quadrature_t *milonga_define_polar_quadrature(char *, expr_t *, int);
+extern polar_quadrature_t *milonga_get_polar_quadrature_ptr(const char *);
 
 
 extern int wasora_set_point_coords(double *, const double, const double, const double);

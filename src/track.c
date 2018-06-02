@@ -20,7 +20,7 @@
  *------------------- ------------  ----    --------  --     -       -         -
  */
 
-#include "../milonga.h"
+#include "milonga.h"
 
 int milonga_instruction_track(void *arg) {
   
@@ -1469,6 +1469,75 @@ int milonga_instruction_polar_quadrature(void *arg) {
   wasora_call(track_init_polar_quadrature(polar_quad));
   
   return WASORA_RUNTIME_OK;
+}
+
+tracks_t *milonga_define_ray_tracing(char *name, mesh_t *mesh, expr_t *expr_n_azim, expr_t *expr_track_dens, expr_t *expr_track_spacing, expr_t *expr_tiny_step, int do_not_check_volumes, int debug) {
+  
+  tracks_t *ray_tracing;
+  
+  if (name == NULL) {
+    name = strdup("tracks");
+  }
+  
+  if (milonga_get_ray_tracing_ptr(name) != NULL) {
+    wasora_push_error_message("there already exists a track named '%s'", name);
+    return NULL;
+  }
+  
+  ray_tracing = calloc(1, sizeof(tracks_t));
+  ray_tracing->name = strdup(name);
+  ray_tracing->mesh = mesh;
+  ray_tracing->expr_n_azim = expr_n_azim;
+  ray_tracing->expr_track_dens = expr_track_dens;
+  ray_tracing->expr_track_spacing = expr_track_spacing;
+  ray_tracing->expr_tiny_step = expr_tiny_step;
+  ray_tracing->do_not_correct_volumes = do_not_check_volumes;
+  ray_tracing->debug = debug;
+  
+  // la agregamos al hash
+  HASH_ADD_KEYPTR(hh, tracking.ray_tracings, ray_tracing->name, strlen(ray_tracing->name), ray_tracing);
+  // y seteamos la principal como esta
+  tracking.main_ray_tracing = ray_tracing;
+  
+  return ray_tracing;
+}
+
+tracks_t *milonga_get_ray_tracing_ptr(const char *name) {
+  tracks_t *ray_tracing;
+  HASH_FIND_STR(tracking.ray_tracings, name, ray_tracing);
+  return ray_tracing;
+}
+
+polar_quadrature_t *milonga_define_polar_quadrature(char *name, expr_t *expr_n_polar, int polar_quad_type) {
+  
+  polar_quadrature_t *polar_quad;
+  
+  if (name == NULL) {
+    name = strdup("polar_quadrature");
+  }
+  
+  if (milonga_get_polar_quadrature_ptr(name) != NULL) {
+    wasora_push_error_message("there already exists a polar quadrature named '%s'", name);
+    return NULL;
+  }
+  
+  polar_quad = calloc(1, sizeof(polar_quadrature_t));
+  polar_quad->name = strdup(name);
+  polar_quad->expr_n_polar = expr_n_polar;
+  polar_quad->quad_type = polar_quad_type;
+  
+  // la agregamos al hash
+  HASH_ADD_KEYPTR(hh, tracking.polar_quadratures, polar_quad->name, strlen(polar_quad->name), polar_quad);
+  // y seteamos la principal como esta
+  tracking.main_polar_quadrature = polar_quad;
+  
+  return polar_quad;
+}
+
+polar_quadrature_t *milonga_get_polar_quadrature_ptr(const char *name) {
+  polar_quadrature_t *polar_quad;
+  HASH_FIND_STR(tracking.polar_quadratures, name, polar_quad);
+  return polar_quad;
 }
 
 int wasora_set_point_coords(double *xyz, const double x, const double y, const double z) {
