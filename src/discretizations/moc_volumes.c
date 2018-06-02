@@ -170,7 +170,7 @@ int moc_volumes_solve_eigen_problem(int verbose) {
     printf("#   maximum number of iterations is set to %d\n", milonga.moc_solver.max_moc_iterations);
     printf("#   maximum residual error set to %e\n", milonga.moc_solver.max_moc_residual);
     printf("\n");
-    printf("# iter \t residual\n");
+    printf("# iter\tk_eff\tresidual\n");
   }
   
   // esto va aca porque pueden cambiar los tau (sigmaT_g) en diferentes static steps
@@ -194,7 +194,7 @@ int moc_volumes_solve_eigen_problem(int verbose) {
     wasora_call(moc_volumes_update_old_phi());
     
     if (verbose) {
-      printf("%d \t %e\n", iter, residual);
+      printf("%d\t%e\t%e\n", iter, wasora_var_value(milonga.vars.keff), residual);
     }
     
     // por lo menos tenemos que iterar tres veces:
@@ -206,7 +206,7 @@ int moc_volumes_solve_eigen_problem(int verbose) {
     }
   }
   
-  // TODO: encapsular de alguna forma los warnings de wasora
+  // TODO: porque wasora no tiene encapsulados de alguna forma los warnings?
   if (iter == milonga.moc_solver.max_moc_iterations) {
     printf("warning: moc calculation did not converge");
   }
@@ -753,7 +753,7 @@ int moc_volumes_compute_residual(double *residual) {
     
     // fuente total de fision en cada region (los chi los integro en g y suman 1.0 asi q chau)
     for (g_prime = 0; g_prime < milonga.groups; g_prime++) {
-      nu_sigma_f = material_xs->xs_values.nuSigmaF[g];
+      nu_sigma_f = material_xs->xs_values.nuSigmaF[g_prime];
       //nu_sigma_f = wasora_evaluate_expression(material_xs->nuSigmaF[g_prime]);
       new_qi += nu_sigma_f * milonga.moc_solver.phi[cell->index[g_prime]];
       old_qi += nu_sigma_f * milonga.moc_solver.old_phi[cell->index[g_prime]];

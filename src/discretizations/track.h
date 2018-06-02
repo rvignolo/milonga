@@ -148,7 +148,7 @@ struct tracks_t {
   double track_spacing;         // espacio entre lineas (cm)
   
   expr_t *expr_tiny_step;
-  double tiny_step;             // distancia (cm) a moverse hacia dentro de un elemento en la direccion del track
+  double tiny_step;             // distancia (cm) recorrida hacia dentro de un elemento en la direccion del track
   
   int *n_tracks_x;              // cantidad de tracks que arrancan en el eje x para un dado angulo azimutal
   int *n_tracks_y;              // cantidad de tracks que arrancan en el eje y para un dado angulo azimutal

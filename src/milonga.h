@@ -25,14 +25,7 @@
 
 
 #include <wasora.h>
-
-// tiene que estar porque aca usamos referencias a tracking y eso no es de wasora
-// en realidad es una operacion sobre mallas, por lo que deberia ser parte de wasora
 #include "discretizations/track.h"
-
-// y esta esta porque no existe el puntero a funcion que sea solve_problem, 
-// ya que las otras discretizaciones llaman a solvers de petsc o slepsc
-#include "discretizations/moc_volumes.h"
 
 #include <petscsys.h>
 #include <petscpc.h>
@@ -126,8 +119,8 @@ struct {
     
     double max_moc_residual;                // criterio de convergencia con el error relativo
     
-    double *phi;                            // flujo escalar para cada celda y grupo
-    double *old_phi;                        // maneje para computar el residuo entre dos iteraciones
+    double *phi;                            // flujo escalar para cada celda y grupo iteracion actual
+    double *prev_phi;                       // flujo escalar para cada celda y grupo iteracion previa
     
     double *reduced_source;                 // fuente de fision y scatering reducida para cada celda y grupo
     

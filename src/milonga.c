@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include "milonga.h"
+#include "discretizations/moc_volumes.h"
 
 #define time_checkpoint(which) \
   petsc_call(PetscTime(&wall.which)); \
