@@ -29,7 +29,6 @@ typedef struct exp_evaluator_t exp_evaluator_t;
 typedef struct segment_t segment_t;
 typedef struct segment_list_item_t segment_list_item_t;
 typedef struct azimuthal_quadrature_t azimuthal_quadrature_t;
-typedef struct polar_quadrature_t polar_quadrature_t;
 typedef struct quadrature_t quadrature_t;
 typedef struct track_t track_t;
 typedef struct tracks_t tracks_t;
@@ -74,33 +73,9 @@ struct azimuthal_quadrature_t {
   double *w;                  // peso azimutal
 };
 
-struct polar_quadrature_t {
-  char *name;
-  
-  expr_t *expr_n_polar;
-  int n_polar;                // el numero de angulos polares en (0, 1*pi)
-  int n_polar_2;              // el numero de angulos polares en (0, pi/2)
-  
-  double *theta;              // arreglo de angulos polares
-  double *sin_theta;          // arreglo de senos de angulos polares
-  double *w;                  // peso polar
-  
-  enum {                      // diferentes tipos de cuadraturas polares en la literatura
-    tabuchi_yamamoto,
-    equal_weight,
-    equal_angle,
-    gauss_legendre,
-    leonard
-  } quad_type;
-  
-  UT_hash_handle hh;
-};
-
 struct quadrature_t {
   
   azimuthal_quadrature_t *azimuthal;  // azimuthal quadrature 
-  
-  polar_quadrature_t *polar;          // polar quadrature
   
   double *effective_spacing;          // espacio entre tracks (cm) para un dado angulo azimutal
   
@@ -194,12 +169,10 @@ struct track_post_t {
 };
 
 struct {
-  tracks_t *main_ray_tracing;
-  polar_quadrature_t *main_polar_quadrature;
+  tracks_t *main_tracks;
   
-  tracks_t *ray_tracings;                      // tabla de hash de trackings
-  polar_quadrature_t *polar_quadratures;       // tabla de hash de polar quadratures
-} tracking;
+  tracks_t *tracks;                      // tabla de hash de ray tracings
+} milonga_tracks;
 
 extern int milonga_instruction_track(void *);
 
@@ -208,8 +181,6 @@ extern int track_init_quadratures_before_tracking(tracks_t *);
 extern int track_compute_tracks(tracks_t *);
 extern int track_init_quadratures_after_tracking(tracks_t *);
 extern int track_init_azimuthal_weights(azimuthal_quadrature_t *);
-extern int track_init_polar_quadrature(polar_quadrature_t *);
-extern int track_init_polar_quadrature_values(polar_quadrature_t *);
 extern int track_recalibrate_coords(tracks_t *);
 extern int track_segmentize_tracks(tracks_t *);
 extern int track_compute_element_intersections(element_t *, track_t *, double, double, double ***);
@@ -232,13 +203,8 @@ extern int track_gnuplot_write_mesh(track_post_t *);
 extern int track_gnuplot_write_tracks(track_post_t *);
 
 
-extern int milonga_instruction_polar_quadrature(void *);
-
-
 extern tracks_t *milonga_define_ray_tracing(char *, mesh_t *, expr_t *, expr_t *, expr_t *, expr_t *, int, int);
 extern tracks_t *milonga_get_ray_tracing_ptr(const char *);
-extern polar_quadrature_t *milonga_define_polar_quadrature(char *, expr_t *, int);
-extern polar_quadrature_t *milonga_get_polar_quadrature_ptr(const char *);
 
 
 extern int wasora_set_point_coords(double *, const double, const double, const double);

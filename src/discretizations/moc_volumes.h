@@ -22,11 +22,11 @@
 
 #include "../milonga.h"
 
-#define angular_index(t,d,p,g)     ((t)* 2 * milonga.moc_solver.tracks->quadrature->polar->n_polar_2 * milonga.groups + \
-                                    (d)    * milonga.moc_solver.tracks->quadrature->polar->n_polar_2 * milonga.groups + \
-                                    (p)                                                              * milonga.groups + \
+#define angular_index(t,d,p,g)     ((t)* 2 * milonga.moc_solver.polar_quadrature->n_polar_2 * milonga.groups + \
+                                    (d)    * milonga.moc_solver.polar_quadrature->n_polar_2 * milonga.groups + \
+                                    (p)                                                     * milonga.groups + \
                                     (g))
-#define reduced_angular_index(p,g) ((p)                                                              * milonga.groups + \
+#define reduced_angular_index(p,g) ((p)                                                     * milonga.groups + \
                                     (g))
 
 extern int moc_volumes_problem_init(void);

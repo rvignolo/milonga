@@ -342,231 +342,6 @@ int track_init_azimuthal_weights(azimuthal_quadrature_t *azimuthal) {
   return WASORA_RUNTIME_OK;  
 }
 
-int track_init_polar_quadrature(polar_quadrature_t *polar) {
-  
-  // si no se dio una expresion
-  if (polar->expr_n_polar == NULL) {
-  //if (polar == NULL) {
-    
-    //polar = calloc(1, sizeof(polar_quadrature_t));
-    
-    // por defecto, tabuchi-yamamoto con 6 polar angles
-    polar->quad_type = tabuchi_yamamoto;
-    polar->n_polar = 6;
-    polar->n_polar_2 = 6 / 2;
-    
-  } else {
-    
-    // no se si hace falta esto cuado este cambiando todo
-    // if (polar->expr_n_polar != NULL)
-    
-    polar->n_polar = (int) wasora_evaluate_expression(polar->expr_n_polar);
-    
-    if (polar->n_polar <= 0) {
-      wasora_push_error_message("number of polar angles '%d' cannot be negative or zero", polar->n_polar);
-      return WASORA_RUNTIME_ERROR;
-    } else if (polar->n_polar % 2 != 0) {
-      wasora_push_error_message("number of polar angles '%d' is not a multiple of 2", polar->n_polar);
-      return WASORA_RUNTIME_ERROR;
-    } else {
-      polar->n_polar_2 = polar->n_polar / 2;
-    }
-  }
-  
-  wasora_call(track_init_polar_quadrature_values(polar));
-  
-  return WASORA_RUNTIME_OK;
-}
-
-int track_init_polar_quadrature_values(polar_quadrature_t *polar_quad) {
-  
-  int i;
-  
-  polar_quad->theta = calloc(polar_quad->n_polar, sizeof(double *));
-  polar_quad->sin_theta = calloc(polar_quad->n_polar, sizeof(double *));
-  polar_quad->w = calloc(polar_quad->n_polar, sizeof(double *));
-  
-  switch (polar_quad->quad_type) {
-    case tabuchi_yamamoto:
-      // del Handbook de Ingenieria Nuclear pg. 1154
-      if (polar_quad->n_polar == 2) {
-        
-        polar_quad->sin_theta[0] = 0.798184;
-        polar_quad->w[0] =   1.0 / 2.0;
-        
-      } else if (polar_quad->n_polar == 4) {
-        
-        polar_quad->sin_theta[0] = 0.363900;
-        polar_quad->w[0] =   0.212854 / 2.0;
-        
-        polar_quad->sin_theta[1] = 0.899900;
-        polar_quad->w[1] =   0.787146 / 2.0;
-        
-      } else if (polar_quad->n_polar == 6) {
-        
-        polar_quad->sin_theta[0] = 0.166648;
-        polar_quad->w[0] =   0.046233 / 2.0;
-        
-        polar_quad->sin_theta[1] = 0.537707;
-        polar_quad->w[1] =   0.283619 / 2.0;
-        
-        polar_quad->sin_theta[2] = 0.932954;
-        polar_quad->w[2] =   0.670148 / 2.0;
-        
-      } else {
-        wasora_push_error_message("'tabuchi_yamamoto' quadrature not suported for N_POLAR_ANGLES superior than 6");
-        return WASORA_RUNTIME_ERROR;
-      }
-      break;
-    case equal_weight:
-      wasora_push_error_message("'equal_weight' polar quadrature not yet suported");
-      return WASORA_RUNTIME_ERROR;
-    case equal_angle:
-      wasora_push_error_message("'equal_angle' polar quadrature not yet suported");
-      return WASORA_RUNTIME_ERROR;
-    case gauss_legendre:
-      // del Handbook de Ingenieria Nuclear pg. 1153
-      if (polar_quad->n_polar == 2) {
-        
-        polar_quad->theta[0]   = acos(0.5773502691);
-        polar_quad->w[0] = 1.0 / 2.0;
-        
-      } else if (polar_quad->n_polar == 4) {
-        
-        polar_quad->theta[0]   = acos(0.3399810435);
-        polar_quad->w[0] = 0.6521451549 / 2.0;
-        
-        polar_quad->theta[1]   = acos(0.8611363115);
-        polar_quad->w[1] = 0.3478548451 / 2.0;
-        
-      } else if (polar_quad->n_polar == 6) {
-        
-        polar_quad->theta[0]   = acos(0.2386191860);
-        polar_quad->w[0] = 0.4679139346 / 2.0;
-        
-        polar_quad->theta[1]   = acos(0.6612093864);
-        polar_quad->w[1] = 0.3607615730 / 2.0;
-        
-        polar_quad->theta[2]   = acos(0.9324695142);
-        polar_quad->w[2] = 0.1713244924 / 2.0;
-        
-      } else if (polar_quad->n_polar == 8) {
-        
-        polar_quad->theta[0]   = acos(0.1834346424);
-        polar_quad->w[0] = 0.3626837834 / 2.0;
-        
-        polar_quad->theta[1]   = acos(0.5255324099);
-        polar_quad->w[1] = 0.3137066459 / 2.0;
-        
-        polar_quad->theta[2]   = acos(0.7966664774);
-        polar_quad->w[2] = 0.2223810344 / 2.0;
-        
-        polar_quad->theta[3]   = acos(0.9602898564);
-        polar_quad->w[3] = 0.1012285363 / 2.0;
-        
-      } else if (polar_quad->n_polar == 10) {
-        
-        polar_quad->theta[0]   = acos(0.1488743387);
-        polar_quad->w[0] = 0.2955242247 / 2.0;
-        
-        polar_quad->theta[1]   = acos(0.4333953941);
-        polar_quad->w[1] = 0.2692667193 / 2.0;
-        
-        polar_quad->theta[2]   = acos(0.6794095682);
-        polar_quad->w[2] = 0.2190863625 / 2.0;
-        
-        polar_quad->theta[3]   = acos(0.8650633666);
-        polar_quad->w[3] = 0.1494513492 / 2.0;
-        
-        polar_quad->theta[4]   = acos(0.9739065285);
-        polar_quad->w[4] = 0.0666713443 / 2.0;
-        
-      } else if (polar_quad->n_polar == 12) {
-        
-        polar_quad->theta[0]   = acos(0.1252334085);
-        polar_quad->w[0] = 0.2491470458 / 2.0;
-        
-        polar_quad->theta[1]   = acos(0.3678314989);
-        polar_quad->w[1] = 0.2334925365 / 2.0;
-        
-        polar_quad->theta[2]   = acos(0.5873179542);
-        polar_quad->w[2] = 0.2031674267 / 2.0;
-        
-        polar_quad->theta[3]   = acos(0.7699026741);
-        polar_quad->w[3] = 0.1600783286 / 2.0;
-        
-        polar_quad->theta[4]   = acos(0.9041172563);
-        polar_quad->w[4] = 0.1069393260 / 2.0;
-        
-        polar_quad->theta[5]   = acos(0.9815606342);
-        polar_quad->w[5] = 0.0471753364 / 2.0;
-        
-      } else {
-        wasora_push_error_message("'gauss_legendre' quadrature not suported for N_POLAR_ANGLES superior than 12");
-        return WASORA_RUNTIME_ERROR;
-      }
-      break;
-    case leonard:
-      // ver de que referencia sacar esto (paper tabuchi es diferente a openmoc y handbook tiene otras optimizadas por Herbert)
-      // estas se corresponden con el paper de tabuchi
-      if (polar_quad->n_polar == 2) {
-        
-        polar_quad->sin_theta[0] = 0.752244;
-        polar_quad->w[0] =   1.0 / 2.0;
-        
-      } else if (polar_quad->n_polar == 4) {
-        
-        polar_quad->sin_theta[0] = 0.273658;
-        polar_quad->w[0] =   0.139473 / 2.0;
-        
-        polar_quad->sin_theta[1] = 0.865714;
-        polar_quad->w[1] =   0.860527 / 2.0;
-        
-      } else if (polar_quad->n_polar == 6) {
-        
-        polar_quad->sin_theta[0] = 0.103840;
-        polar_quad->w[0] =   0.020530 / 2.0;
-        
-        polar_quad->sin_theta[1] = 0.430723;
-        polar_quad->w[1] =   0.219161 / 2.0;
-        
-        polar_quad->sin_theta[2] = 0.905435;
-        polar_quad->w[2] =   0.760309 / 2.0;
-        
-      } else {
-        wasora_push_error_message("'leonard' quadrature not suported for N_POLAR_ANGLES superior than 6");
-        return WASORA_RUNTIME_ERROR;
-      }
-      break;
-  }
-  
-  // si nos dieron los senos
-  if (polar_quad->quad_type == tabuchi_yamamoto || polar_quad->quad_type == leonard) {
-    // seteamos las componentes que faltan: rellenamos los sin_theta, los pesos y calculamos los angulos 
-    for (i = 0; i < polar_quad->n_polar_2; i++) {
-      polar_quad->sin_theta[polar_quad->n_polar-i-1] = polar_quad->sin_theta[i];
-      polar_quad->w[polar_quad->n_polar-i-1] = polar_quad->w[i];
-      
-      polar_quad->theta[i] = asin(polar_quad->sin_theta[i]);
-      polar_quad->theta[polar_quad->n_polar-i-1] = M_PI - polar_quad->theta[i];
-    }
-  }
-  
-  // si nos dieron los angulos
-  if (polar_quad->quad_type == gauss_legendre) {
-    // seteamos las componentes que faltan: rellenamos los theta, los pesos y calculamos los sin_theta 
-    for (i = 0; i < polar_quad->n_polar_2; i++) {
-      polar_quad->theta[polar_quad->n_polar-i-1] = M_PI - polar_quad->theta[i];
-      polar_quad->w[polar_quad->n_polar-i-1] = polar_quad->w[i];
-      
-      polar_quad->sin_theta[i] = sin(polar_quad->theta[i]);
-      polar_quad->sin_theta[polar_quad->n_polar-i-1] = sin(polar_quad->theta[polar_quad->n_polar-i-1]);
-    }
-  }
-  
-  return WASORA_RUNTIME_OK;
-}
-
 int track_recalibrate_coords(tracks_t *tracks) {
   
   int i;
@@ -963,7 +738,7 @@ alpha_im    \t %e", tracks->mesh->cell[segment->element->cell->id - 1].id, track
 int tracks_set_tracks_boundary_conditions(tracks_t *tracks) {
   
   int i, j;
-  int parallels;
+  int parallel_side;
   
   double ABC[3];
   double x_int[3];
@@ -1003,22 +778,20 @@ int tracks_set_tracks_boundary_conditions(tracks_t *tracks) {
         // computo su ecuacion general
         track_compute_general_equation(ABC, x1, x2);
         
-        // primero asumimos que el track no es paralelo al elemento de superficie
-        // tener presente que un track nunca es paralelo a un elemento de superficie (siempre hay interseccion)
-        parallels = 0;
+        // un track nunca es paralelo a un elemento de sup, por lo que siempre hay int
+        parallel_side = 0;
         
         // calculo la interseccion entre el track y el elemento de superficie
-        // obs: siempre hay interseccion, solo resta saber si esta cae dentro del elemento de sup.
-        track_compute_intersection(x_int, track->ABC, ABC, &parallels);
+        track_compute_intersection(x_int, track->ABC, ABC, &parallel_side);
         
-        // vemos que nunca se verifique que un track es paralelo a alguna superficie
-        if (parallels) {
+        // pero verificamos que efectivamente nunca se de este caso
+        if (parallel_side) {
           wasora_push_error_message("track '%d' is parallel to surface element '%d'", track->id, element->id);
           return WASORA_RUNTIME_ERROR;
         }
         
         // chekeamos si la interseccion se da sobre el dominio del elemento:
-        // no importa si exactamente no es este el elemento que contiene a la entrada\salida del track
+        // no importa si no es exactamente este el elemento que contiene a la entrada/salida del track
         // ya que todos los elementos sobre una superficie de la bounding box poseen la misma boundary
         eps = 1e-10;
         if (!(wasora_point_in_segment(x1, x2, x_int, eps))) continue;
@@ -1461,19 +1234,9 @@ int track_gnuplot_write_tracks(track_post_t *track_post) {
   return WASORA_RUNTIME_OK;
 }
 
-int milonga_instruction_polar_quadrature(void *arg) {
-  
-  polar_quadrature_t *polar_quad = (polar_quadrature_t *)arg;
-  
-  // en este caso la cuadratura no es por defecto
-  wasora_call(track_init_polar_quadrature(polar_quad));
-  
-  return WASORA_RUNTIME_OK;
-}
-
 tracks_t *milonga_define_ray_tracing(char *name, mesh_t *mesh, expr_t *expr_n_azim, expr_t *expr_track_dens, expr_t *expr_track_spacing, expr_t *expr_tiny_step, int do_not_check_volumes, int debug) {
   
-  tracks_t *ray_tracing;
+  tracks_t *tracks;
   
   if (name == NULL) {
     name = strdup("tracks");
@@ -1484,60 +1247,28 @@ tracks_t *milonga_define_ray_tracing(char *name, mesh_t *mesh, expr_t *expr_n_az
     return NULL;
   }
   
-  ray_tracing = calloc(1, sizeof(tracks_t));
-  ray_tracing->name = strdup(name);
-  ray_tracing->mesh = mesh;
-  ray_tracing->expr_n_azim = expr_n_azim;
-  ray_tracing->expr_track_dens = expr_track_dens;
-  ray_tracing->expr_track_spacing = expr_track_spacing;
-  ray_tracing->expr_tiny_step = expr_tiny_step;
-  ray_tracing->do_not_correct_volumes = do_not_check_volumes;
-  ray_tracing->debug = debug;
+  tracks = calloc(1, sizeof(tracks_t));
+  tracks->name = strdup(name);
+  tracks->mesh = mesh;
+  tracks->expr_n_azim = expr_n_azim;
+  tracks->expr_track_dens = expr_track_dens;
+  tracks->expr_track_spacing = expr_track_spacing;
+  tracks->expr_tiny_step = expr_tiny_step;
+  tracks->do_not_correct_volumes = do_not_check_volumes;
+  tracks->debug = debug;
   
   // la agregamos al hash
-  HASH_ADD_KEYPTR(hh, tracking.ray_tracings, ray_tracing->name, strlen(ray_tracing->name), ray_tracing);
+  HASH_ADD_KEYPTR(hh, milonga_tracks.tracks, tracks->name, strlen(tracks->name), tracks);
   // y seteamos la principal como esta
-  tracking.main_ray_tracing = ray_tracing;
+  milonga_tracks.main_tracks = tracks;
   
-  return ray_tracing;
+  return tracks;
 }
 
 tracks_t *milonga_get_ray_tracing_ptr(const char *name) {
-  tracks_t *ray_tracing;
-  HASH_FIND_STR(tracking.ray_tracings, name, ray_tracing);
-  return ray_tracing;
-}
-
-polar_quadrature_t *milonga_define_polar_quadrature(char *name, expr_t *expr_n_polar, int polar_quad_type) {
-  
-  polar_quadrature_t *polar_quad;
-  
-  if (name == NULL) {
-    name = strdup("polar_quadrature");
-  }
-  
-  if (milonga_get_polar_quadrature_ptr(name) != NULL) {
-    wasora_push_error_message("there already exists a polar quadrature named '%s'", name);
-    return NULL;
-  }
-  
-  polar_quad = calloc(1, sizeof(polar_quadrature_t));
-  polar_quad->name = strdup(name);
-  polar_quad->expr_n_polar = expr_n_polar;
-  polar_quad->quad_type = polar_quad_type;
-  
-  // la agregamos al hash
-  HASH_ADD_KEYPTR(hh, tracking.polar_quadratures, polar_quad->name, strlen(polar_quad->name), polar_quad);
-  // y seteamos la principal como esta
-  tracking.main_polar_quadrature = polar_quad;
-  
-  return polar_quad;
-}
-
-polar_quadrature_t *milonga_get_polar_quadrature_ptr(const char *name) {
-  polar_quadrature_t *polar_quad;
-  HASH_FIND_STR(tracking.polar_quadratures, name, polar_quad);
-  return polar_quad;
+  tracks_t *tracks;
+  HASH_FIND_STR(milonga_tracks.tracks, name, tracks);
+  return tracks;
 }
 
 int wasora_set_point_coords(double *xyz, const double x, const double y, const double z) {
@@ -1568,6 +1299,5 @@ int wasora_point_in_segment(const double *x1, const double *x2, const double *xp
   return (((gsl_fcmp(x1[0], xp[0], eps) <= 0) && (gsl_fcmp(xp[0], x2[0], eps) <= 0)  || 
            (gsl_fcmp(x2[0], xp[0], eps) <= 0) && (gsl_fcmp(xp[0], x1[0], eps) <= 0)) &&
           ((gsl_fcmp(x1[1], xp[1], eps) <= 0) && (gsl_fcmp(xp[1], x2[1], eps) <= 0)  || 
-           (gsl_fcmp(x2[1], xp[1], eps) <= 0) && (gsl_fcmp(xp[1], x1[1], eps) <= 0)));
-    
+           (gsl_fcmp(x2[1], xp[1], eps) <= 0) && (gsl_fcmp(xp[1], x1[1], eps) <= 0)));   
 }

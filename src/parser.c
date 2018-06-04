@@ -246,35 +246,25 @@ int plugin_parse_line(char *line) {
       
       // si estamos en formulacion moc
       if (milonga.formulation == formulation_moc) {
-        // si nos dieron cuadratura pero no el track
-        if (milonga.moc_solver.tracks == NULL && milonga.moc_solver.polar_quadrature != NULL) {
-          wasora_push_error_message("TRACK should be given if a polar quadrature is selected in MILONGA_PROBLEM", token);
-          return WASORA_PARSER_ERROR;
-          
-          // si nos dieron el track pero no la cuadratura, usamos por defecto lo que que este trae
-        } else if (milonga.moc_solver.tracks != NULL && milonga.moc_solver.polar_quadrature == NULL) {
-          // no hacemos nada
-          
-          // si no nos dieron nada y han definido al menos un tracking, lo usamos
-        } else if (milonga.moc_solver.tracks == NULL && milonga.moc_solver.polar_quadrature == NULL) {
-          
-          if (tracking.main_ray_tracing != NULL) {
-            milonga.moc_solver.tracks = tracking.main_ray_tracing;
+        
+        // TODO: corregir las condiciones con los nuevos criterios
+        
+        // si no nos dieron los tracks
+        if (milonga.moc_solver.tracks == NULL) {
+          if (milonga_tracks.main_tracks != NULL) {
+            milonga.moc_solver.tracks = milonga_tracks.main_tracks;
           } else {
             wasora_push_error_message("unknown TRACK for MILONGA_PROBLEM", token);
             return WASORA_PARSER_ERROR;
           }
-          // y ademas, si hay una cuadratura principal, tambien la usamos
-          if (tracking.main_polar_quadrature != NULL) {
-            milonga.moc_solver.polar_quadrature = tracking.main_polar_quadrature;
+        }
+        
+        // si no nos dieron la cuadratura polar, ponemos la principal, aunque si tampoco hay
+        // ninguna principal no nos preocupamos porque mas adelante metemos una por defecto
+        if (milonga.moc_solver.polar_quadrature == NULL) {
+          if (milonga_polar_quadratures.main_polar_quadrature != NULL) {
+            milonga.moc_solver.polar_quadrature = milonga_polar_quadratures.main_polar_quadrature;
           }
-          
-          // y si nos dieron todo, no hacemos nada
-        } else if (milonga.moc_solver.tracks != NULL && milonga.moc_solver.polar_quadrature != NULL) {
-          
-        } else {
-          wasora_push_error_message("por aca no deberias pasar nunca!", token);
-          return WASORA_PARSER_ERROR;
         }
       }
       
@@ -284,8 +274,8 @@ int plugin_parse_line(char *line) {
       
 // ---------------------------------------------------------------------
 ///kw+TRACK_MESH+usage TRACK_MESH
-///kw+TRACK_MESH+desc Tracks the mesh for the implementation of the Method of Characteristics.
-///kw+TRACK_MESH+desc A multiple of 4 number for the azimuthal angles must be specified, as well as the track density or azimutal spacing.
+///kw+TRACK_MESH+desc Performs a ray tracing (tracking) over a mesh to later implement the Method of Characteristics.
+///kw+TRACK_MESH+desc The number of azimuthal angles must be specified as a multiple of 4, as well as the track density or azimutal spacing.
 ///kw+TRACK_MESH+desc If several meshes are defined, it selects over which one it is that the tracking is performed.
     } else if (strcasecmp(token, "TRACK_MESH") == 0) {
       
@@ -390,7 +380,7 @@ int plugin_parse_line(char *line) {
 ///kw+POLAR_QUADRATURE+desc Selects the number of polar angles and the polar quadrature type for the Method of Characteristics
     } else if (strcasecmp(token, "POLAR_QUADRATURE") == 0) {
       
-      polar_quadrature_t *polar_quad;
+      polar_quadrature_t *polar_quadrature;
       char *name = NULL;
       int polar_quad_type = 0;
       expr_t *expr_n_polar = calloc(1, sizeof(expr_t));
@@ -427,11 +417,11 @@ int plugin_parse_line(char *line) {
         return WASORA_PARSER_ERROR;
       }
       
-      if ((polar_quad = milonga_define_polar_quadrature(name, expr_n_polar, polar_quad_type)) == NULL) {
+      if ((polar_quadrature = milonga_define_polar_quadrature(name, expr_n_polar, polar_quad_type)) == NULL) {
         return WASORA_PARSER_ERROR;
       }
       
-      if (wasora_define_instruction(milonga_instruction_polar_quadrature, polar_quad) == NULL) {
+      if (wasora_define_instruction(milonga_instruction_polar_quadrature, polar_quadrature) == NULL) {
         return WASORA_PARSER_ERROR;
       }
       

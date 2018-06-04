@@ -26,6 +26,7 @@
 
 #include <wasora.h>
 #include "track.h"
+#include "polar.h"
 
 #include <petscsys.h>
 #include <petscpc.h>

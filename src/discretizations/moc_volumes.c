@@ -79,14 +79,21 @@ int moc_volumes_allocate_solver(void) {
   int scalar_size, angular_size;
   
   // primero nos fijamos a cual cuadratura polar tenemos que apuntar:
-  //   si nos dieron una nueva en MILONGA_PROBLEM apuntamos a ella
-  //   si no nos dieron ninguna, conservamos la cargada por defecto en un ray tracing (no hacemos nada)
-  if (milonga.moc_solver.polar_quadrature != NULL) {
-    milonga.moc_solver.tracks->quadrature->polar = milonga.moc_solver.polar_quadrature;
+  //   si nos dieron una cuadratura en MILONGA_PROBLEM ya apuntamos a ella y no es necesario hacer nada mas
+  //   si no nos dieron ninguna, usamos la principal (ultima definida)
+  //   si no se definio ninguna ni se dio una, creamos una por defecto
+  if (milonga.moc_solver.polar_quadrature == NULL) {
+    
+    if (milonga_polar_quadratures.main_polar_quadrature != NULL)
+      milonga.moc_solver.polar_quadrature = milonga_polar_quadratures.main_polar_quadrature;
+    else {
+      milonga.moc_solver.polar_quadrature = calloc(1, sizeof(polar_quadrature_t));
+      wasora_call(milonga_init_polar_quadrature(milonga.moc_solver.polar_quadrature));
+    }
   }
   
   scalar_size = milonga.problem_size;
-  angular_size = milonga.moc_solver.tracks->n_total_tracks * 2 * milonga.moc_solver.tracks->quadrature->polar->n_polar_2 * milonga.groups;
+  angular_size = milonga.moc_solver.tracks->n_total_tracks * 2 * milonga.moc_solver.polar_quadrature->n_polar_2 * milonga.groups;
   
   milonga.moc_solver.scalar_size = scalar_size;
   milonga.moc_solver.angular_size = angular_size;
@@ -106,19 +113,23 @@ int moc_volumes_compute_total_weights(tracks_t *tracks) {
   
   int i, j;
   
-  tracks->quadrature->w_total = calloc(tracks->quadrature->azimuthal->n_azim_2, sizeof(double *));
-  for (i = 0; i < tracks->quadrature->azimuthal->n_azim_2; i++) {
+  azimuthal_quadrature_t *azimuthal = tracks->quadrature->azimuthal;
+  polar_quadrature_t * polar = milonga.moc_solver.polar_quadrature;
+  double *dh = tracks->quadrature->effective_spacing;
+  
+  tracks->quadrature->w_total = calloc(azimuthal->n_azim_2, sizeof(double *));
+  for (i = 0; i < azimuthal->n_azim_2; i++) {
     // allocamos solo n_polar_2 porque hay simetria polar y simplemente multiplicaremos por 2 al hacer el tally del scalar flux
-    tracks->quadrature->w_total[i] = calloc(tracks->quadrature->polar->n_polar_2, sizeof(double));
+    tracks->quadrature->w_total[i] = calloc(polar->n_polar_2, sizeof(double));
   }
   
-  for (i = 0; i < tracks->quadrature->azimuthal->n_azim_2; i++) {
-    for(j = 0; j < tracks->quadrature->polar->n_polar_2; j++) {
+  for (i = 0; i < azimuthal->n_azim_2; i++) {
+    for(j = 0; j < milonga.moc_solver.polar_quadrature->n_polar_2; j++) {
       tracks->quadrature->w_total[i][j]  = 4.0 * M_PI;
-      tracks->quadrature->w_total[i][j] *= tracks->quadrature->azimuthal->w[i];
-      tracks->quadrature->w_total[i][j] *= tracks->quadrature->polar->w[j];
-      tracks->quadrature->w_total[i][j] *= tracks->quadrature->effective_spacing[i];
-      tracks->quadrature->w_total[i][j] *= tracks->quadrature->polar->sin_theta[j];
+      tracks->quadrature->w_total[i][j] *= azimuthal->w[i];
+      tracks->quadrature->w_total[i][j] *= polar->w[j];
+      tracks->quadrature->w_total[i][j] *= dh[i];
+      tracks->quadrature->w_total[i][j] *= polar->sin_theta[j];
     }
   }
   
@@ -264,7 +275,7 @@ int moc_volumes_compute_exp_table(void) {
   // apuntamos por comodidad
   tracks_t *tracks = milonga.moc_solver.tracks;
   exp_evaluator_t *exp_evaluator = milonga.moc_solver.exp_evaluator;
-  polar_quadrature_t *polar_quad = milonga.moc_solver.tracks->quadrature->polar;
+  polar_quadrature_t *polar_quad = milonga.moc_solver.polar_quadrature;
   
   // el numero de intervalos depende del error maximo que querramos
   n_intervals = round(tracks->max_tau / sqrt(8.0 * exp_evaluator->max_err_allowed));
@@ -314,7 +325,7 @@ double moc_volumes_compute_linear_exponential(double tau, int polar) {
   exp_evaluator_t *exp_evaluator = milonga.moc_solver.exp_evaluator;
   
   n = floor(tau / exp_evaluator->delta);
-  n_polar_2 = milonga.moc_solver.tracks->quadrature->polar->n_polar_2;
+  n_polar_2 = milonga.moc_solver.polar_quadrature->n_polar_2;
   
   exponential = exp_evaluator->table[2 * n_polar_2 * n + 2 * polar] * tau + exp_evaluator->table[2 * n_polar_2 * n + 2 * polar + 1];
   
@@ -372,7 +383,7 @@ double moc_volumes_compute_intrinsic_exponential(double tau, int polar) {
   double exponential;
   double sin_theta;
   
-  sin_theta = milonga.moc_solver.tracks->quadrature->polar->sin_theta[polar];
+  sin_theta = milonga.moc_solver.polar_quadrature->sin_theta[polar];
   
   exponential = exp(- tau / sin_theta);
   
@@ -418,7 +429,7 @@ int moc_volumes_set_uniform_start_boundary_psi(double uniform_psi) {
   
   for (t = 0; t < milonga.moc_solver.tracks->n_total_tracks; t++) {
     for (d = 0; d < 2; d++) {
-      for (p = 0; p < milonga.moc_solver.tracks->quadrature->polar->n_polar_2; p++) {
+      for (p = 0; p < milonga.moc_solver.polar_quadrature->n_polar_2; p++) {
         for (g = 0; g < milonga.groups; g++) {
           index = angular_index(t,d,p,g);
           milonga.moc_solver.start_boundary_psi[index] = uniform_psi;
@@ -437,7 +448,7 @@ int moc_volumes_update_boundary_psi(void) {
   
   for (t = 0; t < milonga.moc_solver.tracks->n_total_tracks; t++) {
     for (d = 0; d < 2; d++) {
-      for (p = 0; p < milonga.moc_solver.tracks->quadrature->polar->n_polar_2; p++) {
+      for (p = 0; p < milonga.moc_solver.polar_quadrature->n_polar_2; p++) {
         for (g = 0; g < milonga.groups; g++) {
           index = angular_index(t,d,p,g);
           milonga.moc_solver.boundary_psi[index] = milonga.moc_solver.start_boundary_psi[index];
@@ -487,7 +498,7 @@ int moc_volumes_normalize_fluxes(void) {
   
   for (t = 0; t < milonga.moc_solver.tracks->n_total_tracks; t++) {
     for (d = 0; d < 2; d++) {
-      for (p = 0; p < milonga.moc_solver.tracks->quadrature->polar->n_polar_2; p++) {
+      for (p = 0; p < milonga.moc_solver.polar_quadrature->n_polar_2; p++) {
         for (g = 0; g < milonga.groups; g++) {
           index = angular_index(t,d,p,g);
           milonga.moc_solver.boundary_psi[index] *= normalization_factor;
@@ -607,7 +618,7 @@ int moc_volumes_tally_phi(segment_t *segment, double *boundary_psi, int azim_ind
   double exponential, delta_psi;
   
   for (g = 0; g < milonga.groups; g++) {
-    for (p = 0; p < milonga.moc_solver.tracks->quadrature->polar->n_polar_2; p++) {
+    for (p = 0; p < milonga.moc_solver.polar_quadrature->n_polar_2; p++) {
       
       exponential = milonga.moc_solver.exp_evaluator->compute_exponential(segment->tau[g], p);
       delta_psi = (boundary_psi[reduced_angular_index(p,g)] - milonga.moc_solver.reduced_source[segment->element->cell->index[g]]) * exponential;
@@ -647,7 +658,7 @@ int moc_volumes_set_start_boundary_psi(track_t *current_track, double *boundary_
   
   next_track_id = next_track->id;
   
-  for (p = 0; p < milonga.moc_solver.tracks->quadrature->polar->n_polar_2; p++) {
+  for (p = 0; p < milonga.moc_solver.polar_quadrature->n_polar_2; p++) {
     for (g = 0; g < milonga.groups; g++) {
       milonga.moc_solver.start_boundary_psi[angular_index(next_track_id,next_track_dir,p,g)] = boundary_psi[reduced_angular_index(p,g)] * flag;
     }
