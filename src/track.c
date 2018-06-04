@@ -310,14 +310,6 @@ int track_init_quadratures_after_tracking(tracks_t *tracks) {
   // calculamos la azimuthal quadrature
   wasora_call(track_init_azimuthal_weights(tracks->quadrature->azimuthal));
   
-  
-  // CREO QUE ESTA MAL CONCEPTUALMENTE LLAMAR ACA ESTO, YA QUE EL RAY TRACING NO
-  // DEPENDE REALMENTE DE LO POLAR (ES 2D), ENTONCES BASTA CON LLAMARLA EN LA 
-  // INSTRUCCION DE POLAR QUADRATURE O EN MILONGA PROBLEM
-  // ESTO INCLUSO ME PERMITIRIA PASAR EL RAY TRACING A WASORA, DONDE DEBE ESTAR!
-  // calculamos una polar quadrature por defecto
-  // wasora_call(track_init_polar_quadrature(tracks->quadrature->polar));
-  
   return WASORA_RUNTIME_OK;
 }
 
